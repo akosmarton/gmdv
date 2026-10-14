@@ -33,8 +33,8 @@ files open with it from the file manager. Remove with `make uninstall`
 - Clicking a link to a local file renders that file in place (title bar and auto-reload follow it).
 - Back/forward navigation across visited files, with header-bar buttons and
   `Ctrl+Left` / `Ctrl+Right` (also `Alt+b` / `Alt+f`).
-- Header-bar toggle between the normal column (sized to the default window) and
-  full-window width.
+- Header-bar toggle between the normal reading column (a fixed 900px, centred)
+  and full-window width.
 - Auto-reloads when the opened file changes on disk.
 - Follows the system dark/light color scheme.
 - Registered as the default handler for markdown files after `make install`,

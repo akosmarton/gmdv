@@ -20,7 +20,8 @@ python3 gmdv.py [FILE.md]
 ## Layout
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
-  `read_source`, `render_markdown`, `build_page`, `error_page`, `PALETTE`, `START_PAGE`.
+  `read_source`, `render_markdown`, `build_page`, `error_page`, `PALETTE`,
+  `START_PAGE`, `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
 - `GmdvApp(Adw.Application)`: window assembly in `do_activate` (idempotent — presents
   the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
@@ -48,13 +49,14 @@ python3 gmdv.py [FILE.md]
   Only push when the path actually changes, so re-clicking the same link does not grow the
   stack. `update_nav_buttons` derives both buttons' sensitivity from the index, and the
   actions `app.back`/`app.forward` carry the accelerators.
-- The page column is sized to the default window: `WINDOW_WIDTH` (900) feeds both
-  `set_default_size` and the `.page` rule (`box-sizing:border-box; max-width:{WINDOW_WIDTH}px`),
-  so a fresh window is filled exactly — page 900px, left offset 0, no side margins, no
-  horizontal scrolling (measured `docScrollWidth == innerWidth == 900`). `border-box` keeps
+- The reading column is sized independently of the window: `WINDOW_WIDTH`/`WINDOW_HEIGHT`
+  (960×1000) feed only `set_default_size`, while `PAGE_WIDTH` (900) feeds the `.page` rule
+  (`box-sizing:border-box; max-width:{PAGE_WIDTH}px`). A fresh window therefore shows the
+  900px column centred with 30px side margins and no horizontal scrolling (measured
+  `docScrollWidth == innerWidth == 960`, page width 900, left offset 30). `border-box` keeps
   the 24px padding inside those 900px, leaving an 852px text column (~107 characters per
   line, measured 99-111). A wider window does not stretch the text: the column stays 900px
-  and centres.
+  and centres (measured: window 1500 → left offset 300).
 - Do not express this in `ch`: `ch` is the width of `0` (10.09px at the 16px font) while
   prose averages ~8.08px per character, so `100ch` rendered 105-125 characters per line
   depending on window width. Measure, never guess: count characters per rendered line with
@@ -64,9 +66,10 @@ python3 gmdv.py [FILE.md]
   `build_page`, so every render path agrees: file loads, error pages, theme changes, link
   navigation and back/forward. Pressing the header toggle only flips that class in the live
   document (`apply_width`, no re-render) so the scroll position survives; the next render
-  picks the state up from `self.full_width`. Note the two modes are indistinguishable in
-  the default 900px window — both fill it (measured: window 1500 → normal 900px column
-  centred with 300px margins, full 1500px edge to edge, no horizontal scrolling in either).
+  picks the state up from `self.full_width`. In the default 960px window the two modes are
+  distinct: normal is the 900px column with 30px side margins, full is 960px edge to edge
+  (measured; window 1500 → normal 900px centred with 300px margins, full 1500px edge to
+  edge, no horizontal scrolling in either).
 - One `Gio.FileMonitor` per loaded file (cancel the previous one in `load_file`). Monitor
   events re-render directly, with no debounce; transient double renders on atomic saves
   are accepted. Deleted files render an error page.

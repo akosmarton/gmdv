@@ -18,10 +18,14 @@ import markdown  # noqa: E402
 APP_ID = "io.github.akosmarton.Gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
-# Default window size; the page column is sized to match it exactly so the text
-# column fits a freshly opened window without margins or horizontal scrolling.
-WINDOW_WIDTH = 900
-WINDOW_HEIGHT = 650
+# Default window size. The reading column is narrower than the window, so a
+# fresh window shows the text centred with equal side margins; PAGE_WIDTH keeps
+# that column fixed however the window is resized.
+WINDOW_WIDTH = 960
+WINDOW_HEIGHT = 1000
+
+# Width of the reading column in normal (non-full-width) mode.
+PAGE_WIDTH = 900
 
 PALETTE = {
     False: {
@@ -72,7 +76,7 @@ body {{
 }}
 .page {{
   box-sizing:border-box;
-  max-width:{WINDOW_WIDTH}px;
+  max-width:{PAGE_WIDTH}px;
   margin:0 auto;
   padding:24px;
 }}
