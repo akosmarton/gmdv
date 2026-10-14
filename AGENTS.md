@@ -20,12 +20,14 @@ python3 gmdv.py [FILE.md]
 ## Layout
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
-  `read_source`, `render_markdown`, `build_page`, `error_page`, `PALETTE`,
-  `START_PAGE`, `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
+  `read_source`, `render_markdown`, `build_page`/`error_page` (both take a palette
+  dict), `PALETTE` (a static fallback palette), `START_PAGE`, and the width
+  constants `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
 - `GmdvApp(Adw.Application)`: window assembly in `do_activate` (idempotent — presents
   the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
-  `on_dark_changed`/`set_bg`; file dialog in `on_open_clicked`/`on_open_finish`;
+  `page_palette`/`on_dark_changed`/`apply_theme`/`set_bg`; file dialog in
+  `on_open_clicked`/`on_open_finish`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
   `on_width_toggled`/`apply_width`; file arguments via
@@ -73,8 +75,20 @@ python3 gmdv.py [FILE.md]
 - One `Gio.FileMonitor` per loaded file (cancel the previous one in `load_file`). Monitor
   events re-render directly, with no debounce; transient double renders on atomic saves
   are accepted. Deleted files render an error page.
-- Theme follows `Adw.StyleManager.get_dark()`. Tests can drive it with
+- Theme: the page is painted from the live GTK/Adwaita named colors, read by
+  `theme_palette(context, dark)` through the `THEME_COLORS` mapping
+  (`bg`=`view_bg_color`, `fg`=`view_fg_color`, `border`=`borders`,
+  `code_bg`=`window_bg_color`, `link`=`accent_color`; `muted` is the foreground at
+  55% alpha). `PALETTE` is only the fallback for callers with no theme to read
+  (headless tests). `Gtk.StyleContext.lookup_color` is deprecated since GTK 4.10
+  but remains the only way to read named colors; its `DeprecationWarning` is
+  suppressed locally. Tests drive the scheme with
   `set_color_scheme(Adw.ColorScheme.FORCE_LIGHT)` / `FORCE_DARK`.
+- Reading those colors from inside the `notify::dark` handler still returns the
+  **previous** scheme — GTK revalidates the CSS only after the style manager has
+  notified — so `on_dark_changed` defers the re-render by one main-loop turn
+  (`GLib.idle_add(self.apply_theme)`). Re-rendering inline leaves the page one
+  scheme change behind.
 - WebKit 6.0 snapshots resolve to a `Gdk.Texture` (`texture.save_to_png(path)`), not a
   cairo surface.
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
@@ -107,8 +121,9 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
 2. Runtime DOM probe (needs a display): build the app (`GmdvApp(path)`,
    `register(None)`, `activate()`), wait for the load, then
    `webview.evaluate_javascript(script, -1, None, None, None, cb)` and parse
-   `evaluate_javascript_finish(...).to_string()` to assert rendered DOM, theme colors,
-   monitor reload, deletion handling and link clicks.
+   `evaluate_javascript_finish(...).to_string()` to assert rendered DOM, theme colors
+   (equal to `app.page_palette()`, also after a scheme switch), monitor reload,
+   deletion handling and link clicks.
 3. Visual proof of the page: `webview.get_snapshot(WebKit.SnapshotRegion.FULL_DOCUMENT,
    WebKit.SnapshotOptions.NONE, None, cb)` then save the texture as PNG and look at it.
 4. Visual proof of the whole window (header bar included, no X tooling needed):

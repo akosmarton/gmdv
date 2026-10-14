@@ -36,7 +36,7 @@ files open with it from the file manager. Remove with `make uninstall`
 - Header-bar toggle between the normal reading column (a fixed 900px, centred)
   and full-window width.
 - Auto-reloads when the opened file changes on disk.
-- Follows the system dark/light color scheme.
+- Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`,
   and a second opened file loads in the running window.
 

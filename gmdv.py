@@ -4,6 +4,7 @@
 import html
 import os
 import sys
+import warnings
 
 import gi
 
@@ -27,24 +28,61 @@ WINDOW_HEIGHT = 1000
 # Width of the reading column in normal (non-full-width) mode.
 PAGE_WIDTH = 900
 
+# Adwaita named colors the page is painted from; read out of the live GTK theme
+# by theme_palette(). "muted" (a dim label) is not a theme color, so it is
+# derived from the foreground color instead.
+THEME_COLORS = {
+    "bg": "view_bg_color",
+    "fg": "view_fg_color",
+    "border": "borders",
+    "code_bg": "window_bg_color",
+    "link": "accent_color",
+}
+
+# Fallback palette — the Adwaita light/dark values — for callers that have no GTK
+# theme to read (headless tests). The app always paints from theme_palette().
 PALETTE = {
     False: {
         "bg": "#ffffff",
-        "fg": "#1f2328",
-        "muted": "#656d76",
-        "border": "#d1d9e0",
-        "code_bg": "#f6f8fa",
-        "link": "#0969da",
+        "fg": "rgba(0,0,6,0.8)",
+        "muted": "rgba(0,0,6,0.44)",
+        "border": "rgba(0,0,6,0.12)",
+        "code_bg": "#fafafb",
+        "link": "#0461be",
     },
     True: {
-        "bg": "#0d1117",
-        "fg": "#e6edf3",
-        "muted": "#8b949e",
-        "border": "#30363d",
-        "code_bg": "#161b22",
-        "link": "#58a6ff",
+        "bg": "#1d1d20",
+        "fg": "#ffffff",
+        "muted": "rgba(255,255,255,0.55)",
+        "border": "rgba(255,255,255,0.15)",
+        "code_bg": "#222226",
+        "link": "#81d0ff",
     },
 }
+
+
+def theme_palette(context, dark):
+    """Page palette taken from the live GTK/Adwaita theme.
+
+    ``Gtk.StyleContext.lookup_color`` is deprecated since GTK 4.10 yet remains
+    the only way to read the theme's named colors; every color the theme does
+    not define keeps its static ``PALETTE`` value.
+    """
+    palette = dict(PALETTE[bool(dark)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        for key, name in THEME_COLORS.items():
+            found, rgba = context.lookup_color(name)
+            if found:
+                palette[key] = rgba.to_string()
+        found, fg = context.lookup_color(THEME_COLORS["fg"])
+    if found:
+        palette["muted"] = (
+            f"rgba({round(fg.red * 255)},{round(fg.green * 255)},"
+            f"{round(fg.blue * 255)},{fg.alpha * 0.55:.3f})"
+        )
+    return palette
+
 
 START_PAGE = (
     "<h1>gmdv</h1>"
@@ -63,15 +101,14 @@ def render_markdown(text):
     return markdown.markdown(text, extensions=EXTENSIONS)
 
 
-def build_page(body_html, dark, full_width=False):
+def build_page(body_html, palette, full_width=False):
     """Wrap an HTML fragment in a full styled document."""
-    colors = PALETTE[bool(dark)]
     page_class = "page full" if full_width else "page"
     style = f"""
 body {{
   margin: 0;
-  background: {colors["bg"]};
-  color: {colors["fg"]};
+  background: {palette["bg"]};
+  color: {palette["fg"]};
   font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
 }}
 .page {{
@@ -86,7 +123,7 @@ body {{
 }}
 h1, h2 {{
   font-weight:600;
-  border-bottom:1px solid {colors["border"]};
+  border-bottom:1px solid {palette["border"]};
   padding-bottom:0.3em;
 }}
 h1 {{ font-size: 2em; }}
@@ -95,14 +132,14 @@ h3 {{ font-size: 1.25em; font-weight: 600; }}
 h4 {{ font-size: 1em; font-weight: 600; }}
 p, ul, ol, blockquote, table, pre {{ margin: 1em 0; }}
 pre {{
-  background: {colors["code_bg"]};
+  background: {palette["code_bg"]};
   padding: 16px;
   border-radius: 6px;
   overflow: auto;
 }}
 code {{
   font: 90% ui-monospace, "Cascadia Mono", monospace;
-  background: {colors["code_bg"]};
+  background: {palette["code_bg"]};
   border-radius: 6px;
   padding: 0.2em 0.4em;
 }}
@@ -112,20 +149,20 @@ pre code {{
 }}
 table {{ border-collapse: collapse; }}
 td, th {{
-  border: 1px solid {colors["border"]};
+  border: 1px solid {palette["border"]};
   padding: 6px 13px;
 }}
 th {{ font-weight: 600; }}
 blockquote {{
-  border-left: 0.25em solid {colors["muted"]};
-  color: {colors["muted"]};
+  border-left: 0.25em solid {palette["muted"]};
+  color: {palette["muted"]};
   padding: 0 1em;
 }}
-a {{ color: {colors["link"]}; }}
+a {{ color: {palette["link"]}; }}
 img {{ max-width: 100%; }}
 hr {{
   border: 0;
-  border-top: 1px solid {colors["border"]};
+  border-top: 1px solid {palette["border"]};
 }}
 """
     return (
@@ -135,10 +172,10 @@ hr {{
     )
 
 
-def error_page(message, dark, full_width=False):
+def error_page(message, palette, full_width=False):
     """Render a load-failure page."""
     body = f"<h1>Could not load file</h1><p>{html.escape(message)}</p>"
-    return build_page(body, dark, full_width)
+    return build_page(body, palette, full_width)
 
 
 class GmdvApp(Adw.Application):
@@ -224,8 +261,9 @@ class GmdvApp(Adw.Application):
             self.load_file(self.initial_path)
         else:
             self.title_label.set_text("gmdv")
-            self.set_bg()
-            self.webview.load_html(build_page(START_PAGE, self.is_dark(), self.full_width), "file:///")
+            palette = self.page_palette()
+            self.set_bg(palette)
+            self.webview.load_html(build_page(START_PAGE, palette, self.full_width), "file:///")
 
     def do_open(self, files, n_files, hint):
         """Load a file passed by GApplication (file manager, second instance).
@@ -261,9 +299,16 @@ class GmdvApp(Adw.Application):
         """
         return GLib.filename_to_uri(os.path.abspath(self.path))
 
-    def set_bg(self):
+    def page_palette(self):
+        """Palette for the page, read from the web view's live GTK theme."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            context = self.webview.get_style_context()
+        return theme_palette(context, self.is_dark())
+
+    def set_bg(self, palette=None):
         rgba = Gdk.RGBA()
-        rgba.parse(PALETTE[self.is_dark()]["bg"])
+        rgba.parse((palette or self.page_palette())["bg"])
         self.webview.set_background_color(rgba)
 
     def load_file(self, path, push=True):
@@ -321,13 +366,14 @@ class GmdvApp(Adw.Application):
         self.webview.evaluate_javascript(script, -1, None, None, None, None)
 
     def refresh(self):
+        palette = self.page_palette()
         try:
             body = render_markdown(read_source(self.path))
         except OSError as exc:
-            page, uri = error_page(str(exc), self.is_dark(), self.full_width), "file:///"
+            page, uri = error_page(str(exc), palette, self.full_width), "file:///"
         else:
-            page, uri = build_page(body, self.is_dark(), self.full_width), self.document_uri()
-        self.set_bg()
+            page, uri = build_page(body, palette, self.full_width), self.document_uri()
+        self.set_bg(palette)
         self.webview.load_html(page, uri)
 
     # -- signals ---------------------------------------------------------
@@ -336,9 +382,10 @@ class GmdvApp(Adw.Application):
         if os.path.exists(self.path):
             self.refresh()
         else:
-            self.set_bg()
+            palette = self.page_palette()
+            self.set_bg(palette)
             self.webview.load_html(
-                error_page("File deleted.", self.is_dark(), self.full_width), "file:///"
+                error_page("File deleted.", palette, self.full_width), "file:///"
             )
 
     def on_decide_policy(self, webview, decision, decision_type):
@@ -361,15 +408,29 @@ class GmdvApp(Adw.Application):
         return True
 
     def on_dark_changed(self, *args):
-        self.set_bg()
+        """Queue a re-render for the freshly applied color scheme.
+
+        Reading the theme colors from inside this handler still yields the
+        previous scheme (GTK revalidates the CSS after the style manager has
+        notified), so the work is deferred by one main-loop turn, by which time
+        ``page_palette`` returns the new colors.
+        """
+        GLib.idle_add(self.apply_theme)
+
+    def apply_theme(self):
+        """Re-render the current page with the current theme colors."""
+        palette = self.page_palette()
         if not self.path:
-            self.webview.load_html(build_page(START_PAGE, self.is_dark(), self.full_width), "file:///")
+            self.set_bg(palette)
+            self.webview.load_html(build_page(START_PAGE, palette, self.full_width), "file:///")
         elif os.path.exists(self.path):
             self.refresh()
         else:
+            self.set_bg(palette)
             self.webview.load_html(
-                error_page("File deleted.", self.is_dark(), self.full_width), "file:///"
+                error_page("File deleted.", palette, self.full_width), "file:///"
             )
+        return False
 
     def on_drop(self, target, value, x, y):
         if hasattr(value, "get_files"):
