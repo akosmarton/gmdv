@@ -20,10 +20,12 @@ python3 gmdv.py [FILE.md]
 ## Layout
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
-  `read_source`, `render_markdown`, `build_page`/`error_page` (both take a palette
+  `read_source`, `render` (returns `(body_html, outline)`, the outline being the
+  `(level, name, id)` tuples the sidebar is built from), `build_page`/`error_page` (both take a palette
   dict), `PALETTE` (a static fallback palette), `START_PAGE`, the dependency
   helpers `dotted`/`version_tuple`/`meets`/`gui_stack`/`loaded_report`/
-  `dependency_error`, and the width constants `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
+  `dependency_error`, and the width constants
+  `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`/`OUTLINE_COLLAPSE_WIDTH`.
 - `GmdvApp(Adw.Application)`: window assembly in `do_activate` (idempotent — presents
   the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
@@ -31,7 +33,8 @@ python3 gmdv.py [FILE.md]
   `on_open_clicked`/`on_open_finish`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
-  `on_width_toggled`/`apply_width`; in-page find in
+  `on_width_toggled`/`apply_width`; outline sidebar in
+  `toggle_outline`/`on_outline_toggled`/`set_outline`/`on_outline_row`; in-page find in
   `toggle_find`/`set_search_visible`/`clear_find_highlight`/`run_search`/
   `on_search_changed`/`on_counted_matches`/`on_search_failed`/`on_load_changed`;
   file arguments via
@@ -63,7 +66,10 @@ python3 gmdv.py [FILE.md]
   `docScrollWidth == innerWidth == 960`, page width 900, left offset 30). `border-box` keeps
   the 24px padding inside those 900px, leaving an 852px text column (~107 characters per
   line, measured 99-111). A wider window does not stretch the text: the column stays 900px
-  and centres (measured: window 1500 → left offset 300).
+  and centres (measured: window 1500 → left offset 300). While the outline sidebar is shown
+  the 900px is only a maximum: the page takes the slot the sidebar leaves (measured, 960px
+  window with the sidebar inline: sidebar 240px = a quarter, page 720px,
+  `innerWidth == docScrollWidth == 720`, still no horizontal scrolling).
 - Do not express this in `ch`: `ch` is the width of `0` (10.09px at the 16px font) while
   prose averages ~8.08px per character, so `100ch` rendered 105-125 characters per line
   depending on window width. Measure, never guess: count characters per rendered line with
@@ -98,15 +104,18 @@ python3 gmdv.py [FILE.md]
   cairo surface.
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
 - UI strings are English. No syntax highlighting and no `nl2br`; extensions are exactly
-  `tables`, `fenced_code`, `sane_lists`.
+  `tables`, `fenced_code`, `sane_lists`, `toc` — `toc` only adds `id` attributes to the
+  rendered headings (the outline's anchors, unique per document: duplicates become
+  `api`, `api_1`); it changes no visible output.
 - Dependency versions: `gi.require_version` pins the API generation of the GUI stack
   (Gtk 4.0, Adw 1, WebKit 6.0), which is all a distribution package can be pinned to —
   PyGObject has no PyPI wheels. The releases inside that generation are enforced in
   `main()` by `dependency_error()`: `MIN_GTK` (4.10, `Gtk.FileDialog`), `MIN_ADW`
-  (1.0), `MIN_WEBKIT` (2.40, the 6.0 API) and `MIN_MARKDOWN` (3.0). It exits 1 with one
-  line per offending library and a `loaded_report()` line naming every loaded version;
-  a missing or unparseable version is unknown, never a failure. Only python-markdown is
-  a pip dependency, so only it is pinned exactly (`requirements.txt`,
+  (1.4, `Adw.OverlaySplitView`), `MIN_WEBKIT` (2.40, the 6.0 API) and `MIN_MARKDOWN`
+  (3.0). It exits 1 with one line per offending library and a `loaded_report()` line
+  naming every loaded version; a missing or unparseable version is unknown, never a
+  failure. Only python-markdown is a pip dependency, so only it is pinned exactly
+  (`requirements.txt`,
   `VERIFIED_MARKDOWN`); PyGObject and the interpreter are reported but not floored,
   nothing gmdv calls being gated on their release. Lower a floor only against the API
   actually used, and keep README's table in step.
@@ -147,6 +156,28 @@ python3 gmdv.py [FILE.md]
   link navigation and back/forward. The entry keeps its query across closing
   (reopening reselects and re-runs it), and `set_search_visible` is the single path
   for the toggle and Escape (`stop-search`).
+- The window is `GmdvWindow(Gtk.ApplicationWindow)`, whose child is an
+  `Adw.OverlaySplitView` (`self.split`): its sidebar is a
+  `Gtk.ScrolledWindow` around a `Gtk.ListBox` of rows built by `set_outline` from
+  `render`'s outline, its content is the old `self.find_bar` (revealer + web view).
+  Every `load_html` site calls `set_outline` first — the page and the sidebar can
+  never disagree — with `()` for the start page, error pages and a deleted file.
+  Rows store their heading id on `row.anchor` and click-to-scroll is
+  `getElementById(anchor).scrollIntoView({behavior:'smooth'})` in the live
+  document, so no re-render (and no scroll reset) is involved. Collapse: below
+  `OUTLINE_COLLAPSE_WIDTH` (600) the sidebar overlays the content, at or above it
+  sits beside it. `Adw.Breakpoint` was the obvious driver but needs an `Adw.Bin`
+  window, and `Adw.OverlaySplitView` is final (not subclassable), while GTK 4 has
+  **no** `size-allocate` signal (connect raises `unknown signal name`) and
+  `Gtk.Widget:width` never notifies — so `GmdvWindow.do_size_allocate` sets
+  `collapsed` from the allocation it is handed (measured: 960 → `False`, 500 →
+  `True`, shrink at runtime → `True`). The sidebar starts hidden
+  (`self.outline_visible`), so the default window still shows the plain 900px
+  column and the measurements above are unchanged; toggling only sets the widget's
+  show state, so page scroll and outline survive navigation and monitor reloads.
+  `sidebar-hide-symbolic` is **not** in the installed icon theme (only
+  `sidebar-show-symbolic` is), so the toggle keeps that one icon and the tooltip
+  ("Outline (F9)" / "Hide outline (F9)") carries the state.
 - Installed desktop entry: `make install` rewrites the repo copy's bare
   `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
   GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
@@ -158,7 +189,8 @@ python3 gmdv.py [FILE.md]
 
 There is no test suite; verify with throwaway scripts and delete them afterwards.
 
-1. Headless pure layer: `import gmdv` and assert on `render_markdown`, `build_page`
+1. Headless pure layer: `import gmdv` and assert on `render` (the outline of
+   setext/duplicate headings and that fenced code contributes none), `build_page`
    (palette colors, `box-sizing:border-box` + `max-width:900px`), `error_page`
    (escaping of `<script>`), `read_source`
    (invalid UTF-8 replaced, no exception).
@@ -203,6 +235,20 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    closing the bar. `GObject.signal_lookup` and `GObject.signal_list_names` return
    nothing useful on this host, so a signal's existence is proven by connecting to it
    at runtime, not by introspection.
+10. Outline sidebar: `GmdvApp(path)`, `activate()`, then `activate_action("outline", None)`
+   shows the sidebar (`app.split.get_show_sidebar()`, default `False`) and
+   `app.get_accels_for_action("app.outline") == ("F9",)`; rows are asserted by walking
+   `app.outline_list`'s children (count, label text, `row.anchor`, and the label's
+   `margin_start` growing with the heading level). Clicking is
+   `app.outline_list.emit("row-activated", row)` and the scroll is proven from the DOM
+   (`window.scrollY` and the target heading's `getBoundingClientRect().top` inside the
+   viewport, via `evaluate_javascript` + `evaluate_javascript_finish(...).to_string()`
+   after ~700ms for the smooth scroll). A file with no headings (or the start page)
+   leaves 0 rows and shows `app.outline_empty`; a monitor reload or link navigation
+   replaces the rows with the new document's. Collapse:
+   `app.window.set_default_size(500, 800)` on a live instance → the next allocation
+   sets `app.split.get_collapsed() is True` (`False` at the 960 default; measured
+   on this host, where a mapped window does honour `set_default_size`).
 
 ## Rules
 

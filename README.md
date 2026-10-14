@@ -37,6 +37,8 @@ files open with it from the file manager. Remove with `make uninstall`
   and full-window width.
 - In-page search: `Ctrl+F` or the header magnifier — case-insensitive, wraps
   around, with a match counter.
+- Outline sidebar: the header toggle or `F9` lists the document's headings;
+  click one to scroll to it.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`; each
@@ -48,7 +50,7 @@ files open with it from the file manager. Remove with `make uninstall`
 | --- | --- | --- | --- |
 | GTK 4 | 4.10 (`Gtk.FileDialog`) | 4.22.5 | `gtk4` |
 | PyGObject | any release that loads the typelibs | 3.56.3 | `python3-gobject` |
-| libadwaita (`Adw` 1) | 1.0 | 1.9.4 | `libadwaita` |
+| libadwaita (`Adw` 1) | 1.4 (`Adw.OverlaySplitView`) | 1.9.4 | `libadwaita` |
 | WebKitGTK (`WebKit` 6.0) | 2.40, the first release of the 6.0 API | 2.54.1 | `webkitgtk6.0` |
 | python-markdown | 3.0 | 3.10.3 | `python3-markdown`, or `pip install -r requirements.txt` |
 

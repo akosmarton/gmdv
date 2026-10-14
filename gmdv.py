@@ -2,6 +2,7 @@
 """gmdv — a GTK 4 markdown viewer."""
 
 import html
+import json
 import os
 import sys
 import warnings
@@ -17,7 +18,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango, WebKit  # noqa: E402
 import markdown  # noqa: E402
 
 APP_ID = "io.github.akosmarton.gmdv"
-EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
+EXTENSIONS = ["tables", "fenced_code", "sane_lists", "toc"]
 
 # Dependency contract. gi.require_version above pins the API *generation* of the
 # GUI stack (Gtk 4.0, Adw 1, WebKitGTK 6.0) — the most a distribution package
@@ -31,11 +32,12 @@ EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 #
 #   GTK        4.10 — Gtk.FileDialog, the file chooser (unannotated Adw methods
 #                     and the other Gtk calls date from 4.0)
-#   libadwaita 1.0  — Adw.Application and Adw.StyleManager
+#   libadwaita 1.4  — Adw.OverlaySplitView, the outline sidebar (Adw.Application
+#                     and Adw.StyleManager date from 1.0)
 #   WebKitGTK  2.40 — the first stable release of the WebKit 6.0 API itself
 MIN_MARKDOWN = (3, 0)
 MIN_GTK = (4, 10)
-MIN_ADW = (1, 0)
+MIN_ADW = (1, 4)
 MIN_WEBKIT = (2, 40)
 VERIFIED_MARKDOWN = "3.10.3"
 
@@ -84,7 +86,7 @@ def gui_stack():
             "libadwaita",
             (Adw.MAJOR_VERSION, Adw.MINOR_VERSION, Adw.MICRO_VERSION),
             MIN_ADW,
-            "Adw.Application",
+            "Adw.OverlaySplitView",
         ),
         (
             "WebKitGTK",
@@ -146,6 +148,11 @@ WINDOW_HEIGHT = 1000
 
 # Width of the reading column in normal (non-full-width) mode.
 PAGE_WIDTH = 900
+
+# Window width below which the outline sidebar overlays the page instead of
+# sitting beside it; applied in GmdvWindow.do_size_allocate (Adw.Breakpoint would
+# need an Adw.Bin window, and GTK 4 has no allocation signal or notifying width).
+OUTLINE_COLLAPSE_WIDTH = 600
 
 # Adwaita named colors the page is painted from; read out of the live GTK theme
 # by theme_palette(). "muted" (a dim label) is not a theme color, so it is
@@ -215,9 +222,24 @@ def read_source(path):
         return handle.read()
 
 
-def render_markdown(text):
-    """Convert markdown source to an HTML fragment."""
-    return markdown.markdown(text, extensions=EXTENSIONS)
+def render(text):
+    """Convert markdown source to an HTML fragment and its heading outline.
+
+    Outline entries carry the ids the ``toc`` extension gave the rendered
+    headings; they come from the rendered result, not from re-parsing the
+    source, so setext headings are outlined and fenced code blocks are not.
+    """
+    converter = markdown.Markdown(extensions=EXTENSIONS)
+    body = converter.convert(text)
+    entries = []
+
+    def walk(tokens):
+        for token in tokens:
+            entries.append((token["level"], token["name"], token["id"]))
+            walk(token["children"])
+
+    walk(converter.toc_tokens)
+    return body, tuple(entries)
 
 
 def build_page(body_html, palette, full_width=False):
@@ -297,6 +319,34 @@ def error_page(message, palette, full_width=False):
     return build_page(body, palette, full_width)
 
 
+class GmdvWindow(Gtk.ApplicationWindow):
+    """The application window and the split view holding the outline sidebar.
+
+    ``Adw.Breakpoint`` would express the collapse below ``OUTLINE_COLLAPSE_WIDTH``,
+    but it needs an ``Adw.Bin`` window and ours is a plain ``Gtk.ApplicationWindow``
+    (``Adw.OverlaySplitView`` is final, so it cannot be subclassed either). GTK 4 has
+    no ``size-allocate`` signal and ``Gtk.Widget:width`` does not notify, so the
+    decision is taken in the allocation vfunc itself.
+    """
+
+    __gtype_name__ = "GmdvWindow"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.split = Adw.OverlaySplitView()
+        # show-sidebar defaults to True on this libadwaita; the outline starts
+        # hidden, and every other split-view default (sidebar-width-fraction
+        # 0.25, hide gesture on, pin off) is left alone.
+        self.split.set_show_sidebar(False)
+        self.set_child(self.split)
+
+    def do_size_allocate(self, width, height, baseline):
+        Gtk.ApplicationWindow.do_size_allocate(self, width, height, baseline)
+        collapsed = width < OUTLINE_COLLAPSE_WIDTH
+        if collapsed != self.split.get_collapsed():
+            self.split.set_collapsed(collapsed)
+
+
 class GmdvApp(Adw.Application):
     """Application object owning the window, web view and file monitor."""
 
@@ -311,13 +361,15 @@ class GmdvApp(Adw.Application):
         self.history = []
         self.history_index = -1
         self.full_width = False
+        self.outline_visible = False
 
     def do_activate(self):
         if hasattr(self, "window"):
             self.window.present()
             return
-        self.window = Gtk.ApplicationWindow(application=self)
+        self.window = GmdvWindow(application=self)
         self.window.set_default_size(WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.split = self.window.split
 
         header = Gtk.HeaderBar()
         self.window.set_titlebar(header)
@@ -349,10 +401,17 @@ class GmdvApp(Adw.Application):
         self.search_button.connect("toggled", self.on_find_toggled)
         header.pack_end(self.search_button)
 
+        self.outline_button = Gtk.ToggleButton(icon_name="sidebar-show-symbolic")
+        self.outline_button.set_tooltip_text("Outline (F9)")
+        self.outline_button.set_active(self.outline_visible)
+        self.outline_button.connect("toggled", self.on_outline_toggled)
+        header.pack_end(self.outline_button)
+
         for name, handler in (
             ("back", self.go_back),
             ("forward", self.go_forward),
             ("find", self.toggle_find),
+            ("outline", self.toggle_outline),
         ):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", handler)
@@ -364,6 +423,7 @@ class GmdvApp(Adw.Application):
             "app.forward", ["<Control>Right", "<Alt>Right", "<Alt>f"]
         )
         self.set_accels_for_action("app.find", ["<Control>f"])
+        self.set_accels_for_action("app.outline", ["F9"])
 
         self.title_label = Gtk.Label()
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -414,7 +474,23 @@ class GmdvApp(Adw.Application):
         self.find_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.find_bar.append(self.find_revealer)
         self.find_bar.append(self.webview)
-        self.window.set_child(self.find_bar)
+
+        # Outline sidebar: the headings of the loaded document, click to scroll.
+        self.outline_list = Gtk.ListBox()
+        self.outline_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.outline_list.connect("row-activated", self.on_outline_row)
+        self.outline_empty = Gtk.Label(label="No headings")
+        self.outline_empty.set_css_classes(["dim-label"])
+        self.outline_empty.set_visible(False)
+        outline_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outline_box.append(self.outline_list)
+        outline_box.append(self.outline_empty)
+        outline_scroll = Gtk.ScrolledWindow()
+        outline_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        outline_scroll.set_child(outline_box)
+
+        self.split.set_sidebar(outline_scroll)
+        self.split.set_content(self.find_bar)
 
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect("drop", self.on_drop)
@@ -445,6 +521,7 @@ class GmdvApp(Adw.Application):
             self.title_label.set_text("gmdv")
             palette = self.page_palette()
             self.set_bg(palette)
+            self.set_outline(())
             self.webview.load_html(build_page(START_PAGE, palette, self.full_width), "file:///")
 
     def do_open(self, files, n_files, hint):
@@ -549,6 +626,50 @@ class GmdvApp(Adw.Application):
         )
         self.webview.evaluate_javascript(script, -1, None, None, None, None)
 
+    # -- outline sidebar -------------------------------------------------
+
+    def set_outline(self, entries):
+        """Rebuild the sidebar rows for the page being loaded."""
+        row = self.outline_list.get_first_child()
+        while row:
+            following = row.get_next_sibling()
+            self.outline_list.remove(row)
+            row = following
+        for level, name, anchor in entries:
+            label = Gtk.Label(label=name)
+            label.set_halign(Gtk.Align.START)
+            label.set_xalign(0.0)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
+            label.set_margin_start(12 + 12 * (level - 1))
+            label.set_margin_top(3)
+            label.set_margin_bottom(3)
+            item = Gtk.ListBoxRow()
+            item.anchor = anchor
+            item.set_child(label)
+            self.outline_list.append(item)
+        self.outline_empty.set_visible(not entries)
+
+    def toggle_outline(self, *_args):
+        """Header button and ``F9`` share this entry point."""
+        self.outline_button.set_active(not self.outline_button.get_active())
+
+    def on_outline_toggled(self, button):
+        self.outline_visible = button.get_active()
+        self.split.set_show_sidebar(self.outline_visible)
+        if self.outline_visible:
+            button.set_tooltip_text("Hide outline (F9)")
+        else:
+            button.set_tooltip_text("Outline (F9)")
+
+    def on_outline_row(self, box, row):
+        script = (
+            "(() => {"
+            f" const node = document.getElementById({json.dumps(row.anchor)});"
+            " if (node) node.scrollIntoView({behavior:'smooth', block:'start'});"
+            " })()"
+        )
+        self.webview.evaluate_javascript(script, -1, None, None, None, None)
+
     # -- find in page ----------------------------------------------------
 
     def toggle_find(self, *_args):
@@ -643,12 +764,15 @@ class GmdvApp(Adw.Application):
     def refresh(self):
         palette = self.page_palette()
         try:
-            body = render_markdown(read_source(self.path))
+            body, outline = render(read_source(self.path))
         except OSError as exc:
-            page, uri = error_page(str(exc), palette, self.full_width), "file:///"
+            page, outline = error_page(str(exc), palette, self.full_width), ()
+            uri = "file:///"
         else:
-            page, uri = build_page(body, palette, self.full_width), self.document_uri()
+            page = build_page(body, palette, self.full_width)
+            uri = self.document_uri()
         self.set_bg(palette)
+        self.set_outline(outline)
         self.webview.load_html(page, uri)
 
     # -- signals ---------------------------------------------------------
@@ -659,6 +783,7 @@ class GmdvApp(Adw.Application):
         else:
             palette = self.page_palette()
             self.set_bg(palette)
+            self.set_outline(())
             self.webview.load_html(
                 error_page("File deleted.", palette, self.full_width), "file:///"
             )
@@ -697,11 +822,13 @@ class GmdvApp(Adw.Application):
         palette = self.page_palette()
         if not self.path:
             self.set_bg(palette)
+            self.set_outline(())
             self.webview.load_html(build_page(START_PAGE, palette, self.full_width), "file:///")
         elif os.path.exists(self.path):
             self.refresh()
         else:
             self.set_bg(palette)
+            self.set_outline(())
             self.webview.load_html(
                 error_page("File deleted.", palette, self.full_width), "file:///"
             )
