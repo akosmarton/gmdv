@@ -140,10 +140,10 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    so accelerators themselves are verified as registrations, not as delivered keypresses.
 6. Window smoke: `timeout 8 python3 gmdv.py /tmp/demo.md; echo $?` → expect `124`
    (window stayed up) with empty stderr.
-7. Install / file association: `desktop-file-validate data/io.github.akosmarton.Gmdv.desktop`
+7. Install / file association: `desktop-file-validate data/io.github.akosmarton.gmdv.desktop`
    (exit 0, no output); `make install` → `~/.local/bin/gmdv` executable, desktop entry
    and icon under `~/.local/share`; `gio mime text/markdown` and
-   `xdg-mime query default text/markdown` both report `io.github.akosmarton.Gmdv.desktop`.
+   `xdg-mime query default text/markdown` both report `io.github.akosmarton.gmdv.desktop`.
 8. Multi-instance (the real "opens with gmdv" path): with one instance showing file A,
    `gio open fileB.md` must start a **second** process whose window shows B and is
    `is_active()`, while the first keeps showing A; `busctl --user list | grep gmdv`

@@ -16,7 +16,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango, WebKit  # noqa: E402
 
 import markdown  # noqa: E402
 
-APP_ID = "io.github.akosmarton.Gmdv"
+APP_ID = "io.github.akosmarton.gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
 # Default window size. The reading column is narrower than the window, so a

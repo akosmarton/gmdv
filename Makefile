@@ -1,7 +1,7 @@
 # User-local install. For a system-wide install run the same targets with sudo
 # and a system prefix, e.g.:  sudo make install PREFIX=/usr/local
 PREFIX ?= $(HOME)/.local
-APP_ID = io.github.akosmarton.Gmdv
+APP_ID = io.github.akosmarton.gmdv
 DESTBIN = $(PREFIX)/bin
 DESTAPP = $(PREFIX)/share/applications
 DESTICON = $(PREFIX)/share/icons/hicolor/scalable/apps
