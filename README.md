@@ -8,6 +8,24 @@ A small GTK 4 markdown viewer that renders files in a GitHub-like styled view.
 python3 gmdv.py [FILE.md]
 ```
 
+## Install
+
+User-local (no root needed):
+
+```sh
+make install
+```
+
+System-wide:
+
+```sh
+sudo make install PREFIX=/usr/local
+```
+
+This registers gmdv as the default application for `text/markdown`, so `.md`
+files open with it from the file manager. Remove with `make uninstall`
+(and `sudo make uninstall PREFIX=/usr/local`).
+
 ## Features
 
 - Rendered markdown view (headings, tables, fenced code blocks, blockquotes).
@@ -19,6 +37,8 @@ python3 gmdv.py [FILE.md]
   full-window width.
 - Auto-reloads when the opened file changes on disk.
 - Follows the system dark/light color scheme.
+- Registered as the default handler for markdown files after `make install`,
+  and a second opened file loads in the running window.
 
 ## Requirements
 

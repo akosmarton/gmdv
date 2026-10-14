@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=gmdv
+GenericName=Markdown Viewer
+Comment=View markdown files
+Exec=gmdv %f
+Icon=io.github.akosmarton.Gmdv
+Terminal=false
+Categories=Utility;Viewer;
+Keywords=markdown;viewer;
+MimeType=text/markdown;
+StartupWMClass=io.github.akosmarton.Gmdv

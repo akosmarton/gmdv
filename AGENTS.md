@@ -21,12 +21,14 @@ python3 gmdv.py [FILE.md]
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
   `read_source`, `render_markdown`, `build_page`, `error_page`, `PALETTE`, `START_PAGE`.
-- `GmdvApp(Adw.Application)`: window assembly in `do_activate`; render pipeline in
+- `GmdvApp(Adw.Application)`: window assembly in `do_activate` (idempotent — presents
+  the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
   `on_dark_changed`/`set_bg`; file dialog in `on_open_clicked`/`on_open_finish`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
-  `on_width_toggled`/`apply_width`; argv in `main`.
+  `on_width_toggled`/`apply_width`; file arguments via
+  `Gio.ApplicationFlags.HANDLES_OPEN` in `__init__` and `do_open`; argv in `main`.
 
 ## Invariants and gotchas
 
@@ -75,6 +77,21 @@ python3 gmdv.py [FILE.md]
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
 - UI strings are English. No syntax highlighting and no `nl2br`; extensions are exactly
   `tables`, `fenced_code`, `sane_lists`.
+- The app holds the `io.github.akosmarton.Gmdv` bus name (`HANDLES_OPEN`). A second launch
+  (CLI, file manager, `xdg-open`) must not parse argv itself but forward files through
+  `run(sys.argv)` + `do_open`, which reuses `load_file`; the `path != self.path` check in
+  `load_file` keeps the history from growing on repeat opens. On a **cold** start with a
+  file argument, this GLib calls `do_open` *instead of* `do_activate` (neither is called
+  first), so `do_open` must build the window itself — hence `do_activate` is idempotent
+  (present and return if the window exists) and `do_open` falls back to
+  `initial_path` + `do_activate()` when no window is up yet.
+
+- Installed desktop entry: `make install` rewrites the repo copy's bare
+  `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
+  GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
+  `Exec` command is absent from `PATH`; a graphical session's `PATH` (measured:
+  `/usr/lib64/ccache:/usr/local/bin:/usr/bin`) need not contain `~/.local/bin`.
+  The repo `data/*.desktop` stays portable; only the installed copy is pinned.
 
 ## Verification
 
@@ -101,6 +118,14 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    so accelerators themselves are verified as registrations, not as delivered keypresses.
 6. Window smoke: `timeout 8 python3 gmdv.py /tmp/demo.md; echo $?` → expect `124`
    (window stayed up) with empty stderr.
+7. Install / file association: `desktop-file-validate data/io.github.akosmarton.Gmdv.desktop`
+   (exit 0, no output); `make install` → `~/.local/bin/gmdv` executable, desktop entry
+   and icon under `~/.local/share`; `gio mime text/markdown` and
+   `xdg-mime query default text/markdown` both report `io.github.akosmarton.Gmdv.desktop`.
+8. Cross-process forwarding (the real "opens with gmdv" path): a primary holds the bus
+   name showing file A, then `gio open fileB.md` must make the installed
+   `~/.local/bin/gmdv` forward file B to the primary (webview renders B, title is B).
+   Kill stray gmdv processes before each launch so the bus name is free.
 
 ## Rules
 

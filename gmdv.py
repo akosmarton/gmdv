@@ -15,7 +15,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango, WebKit  # noqa: E402
 
 import markdown  # noqa: E402
 
-APP_ID = "io.github.gmdv.Gmdv"
+APP_ID = "io.github.akosmarton.Gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
 # Default window size; the page column is sized to match it exactly so the text
@@ -141,7 +141,9 @@ class GmdvApp(Adw.Application):
     """Application object owning the window, web view and file monitor."""
 
     def __init__(self, initial_path=None):
-        super().__init__(application_id=APP_ID)
+        super().__init__(
+            application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN
+        )
         self.initial_path = initial_path
         self.path = None
         self.monitor = None
@@ -150,6 +152,9 @@ class GmdvApp(Adw.Application):
         self.full_width = False
 
     def do_activate(self):
+        if hasattr(self, "window"):
+            self.window.present()
+            return
         self.window = Gtk.ApplicationWindow(application=self)
         self.window.set_default_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 
@@ -217,6 +222,26 @@ class GmdvApp(Adw.Application):
             self.title_label.set_text("gmdv")
             self.set_bg()
             self.webview.load_html(build_page(START_PAGE, self.is_dark(), self.full_width), "file:///")
+
+    def do_open(self, files, n_files, hint):
+        """Load a file passed by GApplication (file manager, second instance).
+
+        When a cold start carries a file argument, GApplication on this host
+        calls ``open`` *instead of* ``activate`` (and calls neither first), so
+        there is no window yet: build it here, reusing ``do_activate``. A
+        second instance is remote, forwards its file here, and reaches the
+        ``load_file`` branch with the primary's window already up.
+        """
+        if n_files < 1:
+            return
+        path = files[0].get_path()
+        if not path:
+            return
+        if not hasattr(self, "window"):
+            self.initial_path = path
+            self.do_activate()
+        else:
+            self.load_file(path)
 
     # -- helpers ---------------------------------------------------------
 
@@ -389,7 +414,7 @@ class GmdvApp(Adw.Application):
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else None
-    return GmdvApp(path).run([])
+    return GmdvApp(path).run(sys.argv)
 
 
 if __name__ == "__main__":
