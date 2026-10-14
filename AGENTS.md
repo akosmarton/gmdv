@@ -31,7 +31,8 @@ python3 gmdv.py [FILE.md]
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
   `on_width_toggled`/`apply_width`; file arguments via
-  `Gio.ApplicationFlags.HANDLES_OPEN` in `__init__` and `do_open`; argv in `main`.
+  `Gio.ApplicationFlags.HANDLES_OPEN`/`NON_UNIQUE` in `__init__` and `do_open`; argv in
+  `main`.
 
 ## Invariants and gotchas
 
@@ -94,15 +95,18 @@ python3 gmdv.py [FILE.md]
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
 - UI strings are English. No syntax highlighting and no `nl2br`; extensions are exactly
   `tables`, `fenced_code`, `sane_lists`.
-- The app holds the `io.github.akosmarton.Gmdv` bus name (`HANDLES_OPEN`). A second launch
-  (CLI, file manager, `xdg-open`) must not parse argv itself but forward files through
-  `run(sys.argv)` + `do_open`, which reuses `load_file`; the `path != self.path` check in
-  `load_file` keeps the history from growing on repeat opens. On a **cold** start with a
-  file argument, this GLib calls `do_open` *instead of* `do_activate` (neither is called
-  first), so `do_open` must build the window itself — hence `do_activate` is idempotent
-  (present and return if the window exists) and `do_open` falls back to
-  `initial_path` + `do_activate()` when no window is up yet.
-
+- Instances are per launch (`NON_UNIQUE`): the app owns no bus name and never forwards,
+  so opening a file from outside (file manager, `xdg-open`) starts a **fresh, focused
+  window** instead of swapping the document inside a background instance (measured:
+  launched through the desktop entry the new window is `is_active() == True`, and a
+  running instance keeps its own file). `run(sys.argv)` lets GApplication parse the file
+  argument and hands it to `do_open`; `load_file`'s `path != self.path` check keeps the
+  history from growing on repeat opens. On a **cold** start with a file argument this
+  GLib calls `do_open` *instead of* `do_activate` (neither is called first), so `do_open`
+  builds the window itself — hence `do_activate` is idempotent (present and return if the
+  window exists) and `do_open` falls back to `initial_path` + `do_activate()` when no
+  window is up yet; an in-process `open()` with a window already up loads the file and
+  raises it.
 - Installed desktop entry: `make install` rewrites the repo copy's bare
   `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
   GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
@@ -140,10 +144,11 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    (exit 0, no output); `make install` → `~/.local/bin/gmdv` executable, desktop entry
    and icon under `~/.local/share`; `gio mime text/markdown` and
    `xdg-mime query default text/markdown` both report `io.github.akosmarton.Gmdv.desktop`.
-8. Cross-process forwarding (the real "opens with gmdv" path): a primary holds the bus
-   name showing file A, then `gio open fileB.md` must make the installed
-   `~/.local/bin/gmdv` forward file B to the primary (webview renders B, title is B).
-   Kill stray gmdv processes before each launch so the bus name is free.
+8. Multi-instance (the real "opens with gmdv" path): with one instance showing file A,
+   `gio open fileB.md` must start a **second** process whose window shows B and is
+   `is_active()`, while the first keeps showing A; `busctl --user list | grep gmdv`
+   reports no bus name. Verify the launched window is active by pointing a throwaway
+   desktop file's `Exec` at a probe script that logs `window.is_active()`.
 
 ## Rules
 

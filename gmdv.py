@@ -183,7 +183,8 @@ class GmdvApp(Adw.Application):
 
     def __init__(self, initial_path=None):
         super().__init__(
-            application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN
+            application_id=APP_ID,
+            flags=Gio.ApplicationFlags.HANDLES_OPEN | Gio.ApplicationFlags.NON_UNIQUE,
         )
         self.initial_path = initial_path
         self.path = None
@@ -266,13 +267,14 @@ class GmdvApp(Adw.Application):
             self.webview.load_html(build_page(START_PAGE, palette, self.full_width), "file:///")
 
     def do_open(self, files, n_files, hint):
-        """Load a file passed by GApplication (file manager, second instance).
+        """Load a file passed by GApplication (file manager, CLI, ``xdg-open``).
 
-        When a cold start carries a file argument, GApplication on this host
-        calls ``open`` *instead of* ``activate`` (and calls neither first), so
-        there is no window yet: build it here, reusing ``do_activate``. A
-        second instance is remote, forwards its file here, and reaches the
-        ``load_file`` branch with the primary's window already up.
+        Instances are unique-per-launch (`NON_UNIQUE`), so no file is ever
+        forwarded: a launch carrying a file argument reaches this handler in its
+        own process, where GApplication on this host calls ``open`` *instead of*
+        ``activate`` (neither is called first) and no window exists yet — build
+        it here, reusing ``do_activate``. If a window is already up (an
+        in-process ``open()``), load the file and raise that window.
         """
         if n_files < 1:
             return
@@ -284,6 +286,7 @@ class GmdvApp(Adw.Application):
             self.do_activate()
         else:
             self.load_file(path)
+            self.window.present()
 
     # -- helpers ---------------------------------------------------------
 

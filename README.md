@@ -37,8 +37,8 @@ files open with it from the file manager. Remove with `make uninstall`
   and full-window width.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
-- Registered as the default handler for markdown files after `make install`,
-  and a second opened file loads in the running window.
+- Registered as the default handler for markdown files after `make install`; each
+  opened file gets its own window (multiple instances are allowed).
 
 ## Requirements
 
