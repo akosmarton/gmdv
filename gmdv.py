@@ -59,9 +59,10 @@ def render_markdown(text):
     return markdown.markdown(text, extensions=EXTENSIONS)
 
 
-def build_page(body_html, dark):
+def build_page(body_html, dark, full_width=False):
     """Wrap an HTML fragment in a full styled document."""
     colors = PALETTE[bool(dark)]
+    page_class = "page full" if full_width else "page"
     style = f"""
 body {{
   margin: 0;
@@ -74,6 +75,10 @@ body {{
   max-width:{WINDOW_WIDTH}px;
   margin:0 auto;
   padding:24px;
+}}
+.page.full {{
+  max-width:none;
+  margin:0;
 }}
 h1, h2 {{
   font-weight:600;
@@ -122,14 +127,14 @@ hr {{
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
         f"<style>{style}</style></head>"
-        f"<body><div class=\"page\">{body_html}</div></body></html>"
+        f"<body><div class=\"{page_class}\">{body_html}</div></body></html>"
     )
 
 
-def error_page(message, dark):
+def error_page(message, dark, full_width=False):
     """Render a load-failure page."""
     body = f"<h1>Could not load file</h1><p>{html.escape(message)}</p>"
-    return build_page(body, dark)
+    return build_page(body, dark, full_width)
 
 
 class GmdvApp(Adw.Application):
@@ -142,6 +147,7 @@ class GmdvApp(Adw.Application):
         self.monitor = None
         self.history = []
         self.history_index = -1
+        self.full_width = False
 
     def do_activate(self):
         self.window = Gtk.ApplicationWindow(application=self)
@@ -165,6 +171,12 @@ class GmdvApp(Adw.Application):
         open_button.set_tooltip_text("Open a markdown file")
         open_button.connect("clicked", self.on_open_clicked)
         header.pack_start(open_button)
+
+        self.width_button = Gtk.ToggleButton(icon_name="zoom-original-symbolic")
+        self.width_button.set_tooltip_text("Normal width (click for full width)")
+        self.width_button.set_active(self.full_width)
+        self.width_button.connect("toggled", self.on_width_toggled)
+        header.pack_end(self.width_button)
 
         for name, handler in (("back", self.go_back), ("forward", self.go_forward)):
             action = Gio.SimpleAction.new(name, None)
@@ -204,7 +216,7 @@ class GmdvApp(Adw.Application):
         else:
             self.title_label.set_text("gmdv")
             self.set_bg()
-            self.webview.load_html(build_page(START_PAGE, self.is_dark()), "file:///")
+            self.webview.load_html(build_page(START_PAGE, self.is_dark(), self.full_width), "file:///")
 
     # -- helpers ---------------------------------------------------------
 
@@ -255,13 +267,37 @@ class GmdvApp(Adw.Application):
         self.back_button.set_sensitive(self.history_index > 0)
         self.forward_button.set_sensitive(self.history_index + 1 < len(self.history))
 
+    def on_width_toggled(self, button):
+        self.full_width = button.get_active()
+        if self.full_width:
+            button.set_icon_name("zoom-fit-best-symbolic")
+            button.set_tooltip_text("Full width (click for normal width)")
+        else:
+            button.set_icon_name("zoom-original-symbolic")
+            button.set_tooltip_text("Normal width (click for full width)")
+        self.apply_width()
+
+    def apply_width(self):
+        """Switch the loaded page between the normal and full-width column.
+
+        The class is toggled in the live document rather than re-rendering, so the
+        scroll position survives; every later render picks the state up from
+        ``self.full_width``.
+        """
+        full = "true" if self.full_width else "false"
+        script = (
+            "(() => { const page = document.querySelector('.page');"
+            f" if (page) page.classList.toggle('full', {full}); }})()"
+        )
+        self.webview.evaluate_javascript(script, -1, None, None, None, None)
+
     def refresh(self):
         try:
             body = render_markdown(read_source(self.path))
         except OSError as exc:
-            page, uri = error_page(str(exc), self.is_dark()), "file:///"
+            page, uri = error_page(str(exc), self.is_dark(), self.full_width), "file:///"
         else:
-            page, uri = build_page(body, self.is_dark()), self.document_uri()
+            page, uri = build_page(body, self.is_dark(), self.full_width), self.document_uri()
         self.set_bg()
         self.webview.load_html(page, uri)
 
@@ -273,7 +309,7 @@ class GmdvApp(Adw.Application):
         else:
             self.set_bg()
             self.webview.load_html(
-                error_page("File deleted.", self.is_dark()), "file:///"
+                error_page("File deleted.", self.is_dark(), self.full_width), "file:///"
             )
 
     def on_decide_policy(self, webview, decision, decision_type):
@@ -298,12 +334,12 @@ class GmdvApp(Adw.Application):
     def on_dark_changed(self, *args):
         self.set_bg()
         if not self.path:
-            self.webview.load_html(build_page(START_PAGE, self.is_dark()), "file:///")
+            self.webview.load_html(build_page(START_PAGE, self.is_dark(), self.full_width), "file:///")
         elif os.path.exists(self.path):
             self.refresh()
         else:
             self.webview.load_html(
-                error_page("File deleted.", self.is_dark()), "file:///"
+                error_page("File deleted.", self.is_dark(), self.full_width), "file:///"
             )
 
     def on_drop(self, target, value, x, y):

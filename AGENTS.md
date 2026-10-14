@@ -25,7 +25,8 @@ python3 gmdv.py [FILE.md]
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
   `on_dark_changed`/`set_bg`; file dialog in `on_open_clicked`/`on_open_finish`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
-  `go_back`/`go_forward`/`update_nav_buttons`; argv in `main`.
+  `go_back`/`go_forward`/`update_nav_buttons`; width mode in
+  `on_width_toggled`/`apply_width`; argv in `main`.
 
 ## Invariants and gotchas
 
@@ -57,6 +58,13 @@ python3 gmdv.py [FILE.md]
   depending on window width. Measure, never guess: count characters per rendered line with
   the Range API, grouping characters by line top. Re-measure this way after changing the
   font stack, font size, padding or window size.
+- Width mode lives in `self.full_width` and shows up as the `page` / `page full` class from
+  `build_page`, so every render path agrees: file loads, error pages, theme changes, link
+  navigation and back/forward. Pressing the header toggle only flips that class in the live
+  document (`apply_width`, no re-render) so the scroll position survives; the next render
+  picks the state up from `self.full_width`. Note the two modes are indistinguishable in
+  the default 900px window — both fill it (measured: window 1500 → normal 900px column
+  centred with 300px margins, full 1500px edge to edge, no horizontal scrolling in either).
 - One `Gio.FileMonitor` per loaded file (cancel the previous one in `load_file`). Monitor
   events re-render directly, with no debounce; transient double renders on atomic saves
   are accepted. Deleted files render an error page.

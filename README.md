@@ -15,6 +15,8 @@ python3 gmdv.py [FILE.md]
 - Clicking a link to a local file renders that file in place (title bar and auto-reload follow it).
 - Back/forward navigation across visited files, with header-bar buttons and
   `Ctrl+Left` / `Ctrl+Right` (also `Alt+b` / `Alt+f`).
+- Header-bar toggle between the normal column (sized to the default window) and
+  full-window width.
 - Auto-reloads when the opened file changes on disk.
 - Follows the system dark/light color scheme.
 
