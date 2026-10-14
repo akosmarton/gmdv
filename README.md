@@ -46,3 +46,7 @@ files open with it from the file manager. Remove with `make uninstall`
 - libadwaita (`Adw` 1)
 - WebKitGTK 6.0 (`WebKit` 6.0) bindings
 - `python-markdown` (`pip install markdown`)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
