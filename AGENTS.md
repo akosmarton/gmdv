@@ -219,6 +219,19 @@ python3 gmdv.py [FILE.md]
   `sidebar_bg_color` — measured uniform (46,46,50) over the list area, the strip, and
   the area below the rows of a short outline, against (29,29,32) for the page. The
   `.sidebar` class is not that rule: it changes nothing here.
+- Every header and find-bar button has an accelerator, and every one of them goes
+  through the app action of the same feature: `app.back`/`app.forward` (arrows and
+  `Alt+b`/`Alt+f`), `app.find` (`Ctrl+F`), `app.outline` (`F9`), `app.open`
+  (`Ctrl+O`), `app.width` (`Ctrl+0`), `app.next-match` (`Ctrl+G`),
+  `app.previous-match` (`Ctrl+Shift+G`) and `app.close` (`Ctrl+W`, closing the one
+  window this launch owns). The buttons themselves stay wired to signals (or to
+  the toggle path, e.g. `toggle_width` flipping `width_button`) rather than to
+  `action-name`: a `Gtk.Actionable` binding takes over the widget's sensitivity
+  from the action's enabled state, which would fight the hand-managed
+  `update_nav_buttons` sensitivity on back/forward. Tooltips name the keys
+  ("Outline (F9)"); GTK canonicalises the modifier order when the accelerator is
+  read back (`<Control><Shift>g` comes back as `<Shift><Control>g`), so assert
+  that spelling, not the one passed to `set_accels_for_action`.
 - Installed desktop entry: `make install` rewrites the repo copy's bare
   `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
   GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
@@ -251,6 +264,24 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    directly: `button.get_sensitive()`, `app.get_accels_for_action("app.back")`, and
    `app.activate_action("back", None)`; there is no key-injection tool (xdotool etc.) here,
    so accelerators themselves are verified as registrations, not as delivered keypresses.
+   For the accelerator inventory, walk `app.list_actions()` and compare
+   `get_accels_for_action` against the expected spelling per action (remember GTK
+   canonicalises the modifier order), then drive the action and assert the effect:
+   `app.width` flips `app.full_width`, the toggle's `get_active()`, its tooltip and the
+   `.page full` class in the DOM; `app.next-match`/`app.previous-match` move the current
+   match (read `getSelection().getRangeAt(0).startOffset` — WebKit re-splits the text
+   node around a match, so the numbers are opaque: assert three activations give three
+   distinct offsets and that `previous-match` returns to the one before); `app.close`
+   closes the window (`app.window.get_visible()` False — it also ends the process, so
+   run that step last). `app.open` would raise a modal dialog: patch the *class* before
+   `activate()` (`gmdv.GmdvApp.on_open_clicked = recorder`) so the handler captured at
+   action-registration time is the recorder — activating the action, and emitting
+   `clicked` on the header button, both land there without a dialog. Tooltips naming the
+   keys are collected by walking the `Gtk.HeaderBar` and `app.find_bar` for
+   `Gtk.Button`s and asserting the expected `get_tooltip_text()` strings. Delivery
+   itself is untestable here, but the window does carry a `Gtk.ShortcutController`
+   with `Gtk.ShortcutScope.GLOBAL` — walk `app.window.observe_controllers()`, which
+   is what makes the accels fire whatever holds focus.
 6. Window smoke: `timeout 8 python3 gmdv.py /tmp/demo.md; echo $?` → expect `124`
    (window stayed up) with empty stderr.
 7. Install / file association: `desktop-file-validate data/io.github.akosmarton.gmdv.desktop`

@@ -394,12 +394,12 @@ class GmdvApp(Adw.Application):
         self.update_nav_buttons()
 
         open_button = Gtk.Button(icon_name="document-open-symbolic")
-        open_button.set_tooltip_text("Open a markdown file")
+        open_button.set_tooltip_text("Open a markdown file (Ctrl+O)")
         open_button.connect("clicked", self.on_open_clicked)
         header.pack_start(open_button)
 
         self.width_button = Gtk.ToggleButton(icon_name="zoom-original-symbolic")
-        self.width_button.set_tooltip_text("Normal width (click for full width)")
+        self.width_button.set_tooltip_text("Normal width (Ctrl+0, click for full width)")
         self.width_button.set_active(self.full_width)
         self.width_button.connect("toggled", self.on_width_toggled)
         header.pack_end(self.width_button)
@@ -420,6 +420,11 @@ class GmdvApp(Adw.Application):
             ("forward", self.go_forward),
             ("find", self.toggle_find),
             ("outline", self.toggle_outline),
+            ("open", self.on_open_clicked),
+            ("width", self.toggle_width),
+            ("next-match", self.on_search_next),
+            ("previous-match", self.on_search_previous),
+            ("close", self.close_window),
         ):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", handler)
@@ -432,6 +437,11 @@ class GmdvApp(Adw.Application):
         )
         self.set_accels_for_action("app.find", ["<Control>f"])
         self.set_accels_for_action("app.outline", ["F9"])
+        self.set_accels_for_action("app.open", ["<Control>o"])
+        self.set_accels_for_action("app.width", ["<Control>0"])
+        self.set_accels_for_action("app.next-match", ["<Control>g"])
+        self.set_accels_for_action("app.previous-match", ["<Control><Shift>g"])
+        self.set_accels_for_action("app.close", ["<Control>w"])
 
         self.title_label = Gtk.Label()
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -457,9 +467,9 @@ class GmdvApp(Adw.Application):
         self.find_label.set_xalign(1.0)
 
         self.find_prev_button = Gtk.Button(icon_name="go-up-symbolic")
-        self.find_prev_button.set_tooltip_text("Previous match")
+        self.find_prev_button.set_tooltip_text("Previous match (Ctrl+Shift+G)")
         self.find_next_button = Gtk.Button(icon_name="go-down-symbolic")
-        self.find_next_button.set_tooltip_text("Next match")
+        self.find_next_button.set_tooltip_text("Next match (Ctrl+G)")
 
         find_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         find_row.set_margin_top(6)
@@ -634,14 +644,18 @@ class GmdvApp(Adw.Application):
         self.back_button.set_sensitive(self.history_index > 0)
         self.forward_button.set_sensitive(self.history_index + 1 < len(self.history))
 
+    def toggle_width(self, *_args):
+        """Header width toggle and ``Ctrl+0`` share this entry point."""
+        self.width_button.set_active(not self.width_button.get_active())
+
     def on_width_toggled(self, button):
         self.full_width = button.get_active()
         if self.full_width:
             button.set_icon_name("zoom-fit-best-symbolic")
-            button.set_tooltip_text("Full width (click for normal width)")
+            button.set_tooltip_text("Full width (Ctrl+0, click for normal width)")
         else:
             button.set_icon_name("zoom-original-symbolic")
-            button.set_tooltip_text("Normal width (click for full width)")
+            button.set_tooltip_text("Normal width (Ctrl+0, click for full width)")
         self.apply_width()
 
     def apply_width(self):
@@ -921,7 +935,11 @@ class GmdvApp(Adw.Application):
                 return True
         return False
 
-    def on_open_clicked(self, button):
+    def close_window(self, *_args):
+        """``Ctrl+W``: one window per document, so closing it ends the process."""
+        self.window.close()
+
+    def on_open_clicked(self, *_args):
         dialog = Gtk.FileDialog()
         dialog.set_title("Open Markdown File")
 

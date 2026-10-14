@@ -29,21 +29,24 @@ files open with it from the file manager. Remove with `make uninstall`
 ## Features
 
 - Rendered markdown view (headings, tables, fenced code blocks, blockquotes).
-- Open a file via the header-bar button, drag-and-drop onto the window, or the CLI argument.
+- Open a file via the header-bar button (`Ctrl+O`), drag-and-drop onto the window,
+  or the CLI argument.
 - Clicking a link to a local file renders that file in place (title bar and auto-reload follow it).
 - Back/forward navigation across visited files, with header-bar buttons and
   `Ctrl+Left` / `Ctrl+Right` (also `Alt+b` / `Alt+f`).
 - Header-bar toggle between the normal reading column (a fixed 900px, centred)
-  and full-window width.
+  and full-window width (`Ctrl+0`).
 - In-page search: `Ctrl+F` or the header magnifier — case-insensitive, wraps
-  around, with a match counter.
+  around, with a match counter; `Ctrl+G` / `Ctrl+Shift+G` move to the next /
+  previous match.
 - Outline sidebar: the header toggle or `F9` lists the document's headings;
   click one to scroll to it, and drag the divider to widen or narrow the
   sidebar.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`; each
-  opened file gets its own window (multiple instances are allowed).
+  opened file gets its own window (multiple instances are allowed), and `Ctrl+W`
+  closes one.
 
 ## Requirements
 
