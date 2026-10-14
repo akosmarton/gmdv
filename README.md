@@ -38,7 +38,8 @@ files open with it from the file manager. Remove with `make uninstall`
 - In-page search: `Ctrl+F` or the header magnifier — case-insensitive, wraps
   around, with a match counter.
 - Outline sidebar: the header toggle or `F9` lists the document's headings;
-  click one to scroll to it.
+  click one to scroll to it, and drag the divider to widen or narrow the
+  sidebar.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`; each

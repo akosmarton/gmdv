@@ -154,6 +154,13 @@ PAGE_WIDTH = 900
 # need an Adw.Bin window, and GTK 4 has no allocation signal or notifying width).
 OUTLINE_COLLAPSE_WIDTH = 600
 
+# Bounds the sidebar width may be dragged between, in pixels. The width itself is
+# held as a share of the split view capped at the dragged width, so it survives a
+# window resize proportionally; OUTLINE_WIDTH_MIN is Adw.OverlaySplitView's own
+# minimum, while the 640px ceiling is this app's.
+OUTLINE_WIDTH_MIN = 180
+OUTLINE_WIDTH_MAX = 640
+
 # Adwaita named colors the page is painted from; read out of the live GTK theme
 # by theme_palette(). "muted" (a dim label) is not a theme color, so it is
 # derived from the foreground color instead.
@@ -362,6 +369,7 @@ class GmdvApp(Adw.Application):
         self.history_index = -1
         self.full_width = False
         self.outline_visible = False
+        self.outline_drag = None
 
     def do_activate(self):
         if hasattr(self, "window"):
@@ -478,6 +486,11 @@ class GmdvApp(Adw.Application):
         # Outline sidebar: the headings of the loaded document, click to scroll.
         self.outline_list = Gtk.ListBox()
         self.outline_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        # Adwaita's list background is the page's own view_bg_color, which shows as
+        # a band next to the grab strip (it is transparent, so the pane's
+        # sidebar_bg_color shows there instead). The navigation-sidebar class
+        # repaints the list in sidebar_bg_color, making the whole sidebar one color.
+        self.outline_list.set_css_classes(["navigation-sidebar"])
         self.outline_list.connect("row-activated", self.on_outline_row)
         self.outline_empty = Gtk.Label(label="No headings")
         self.outline_empty.set_css_classes(["dim-label"])
@@ -488,8 +501,27 @@ class GmdvApp(Adw.Application):
         outline_scroll = Gtk.ScrolledWindow()
         outline_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         outline_scroll.set_child(outline_box)
+        outline_scroll.set_hexpand(True)
 
-        self.split.set_sidebar(outline_scroll)
+        # The divider: an invisible 8px grab strip on the sidebar's inner edge,
+        # with the visible 1px line after it so the line lands exactly where the
+        # page starts (a separator *inside* the strip would sit 8px short of it).
+        self.outline_handle = Gtk.Box()
+        self.outline_handle.set_size_request(8, -1)
+        self.outline_handle.set_cursor_from_name("col-resize")
+        drag = Gtk.GestureDrag()
+        drag.connect("drag-begin", self.on_outline_drag_begin)
+        drag.connect("drag-update", self.on_outline_drag_update)
+        self.outline_handle.add_controller(drag)
+
+        outline_sidebar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        outline_sidebar.append(outline_scroll)
+        outline_sidebar.append(self.outline_handle)
+        outline_sidebar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        self.split.set_min_sidebar_width(OUTLINE_WIDTH_MIN)
+        self.split.set_max_sidebar_width(OUTLINE_WIDTH_MAX)
+        self.split.set_sidebar(outline_sidebar)
         self.split.set_content(self.find_bar)
 
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
@@ -669,6 +701,49 @@ class GmdvApp(Adw.Application):
             " })()"
         )
         self.webview.evaluate_javascript(script, -1, None, None, None, None)
+
+    def on_outline_drag_begin(self, gesture, start_x, start_y):
+        """Anchor a divider drag on the width and pointer position it starts at.
+
+        The pointer is read in surface coordinates: the handle travels with the
+        edge it drags, so the offsets GTK reports for it (``get_offset``,
+        ``get_point``) are measured against a moving origin and would cancel out
+        the very movement being dragged.
+        """
+        position = self.pointer_x(gesture)
+        if position is not None:
+            self.outline_drag = (self.split.get_sidebar().get_width(), position)
+
+    def on_outline_drag_update(self, gesture, offset_x, offset_y):
+        """Follow the pointer: the two offsets are ignored, see the begin handler."""
+        position = self.pointer_x(gesture)
+        if position is None or self.outline_drag is None:
+            return
+        width, start = self.outline_drag
+        self.set_outline_width(width + position - start)
+
+    def pointer_x(self, gesture):
+        """The pointer's x during ``gesture``, in surface coordinates, or None."""
+        event = gesture.get_last_event()
+        if event is None:
+            return None
+        found, x, _y = event.get_position()
+        return x if found else None
+
+    def set_outline_width(self, width):
+        """Give the sidebar ``width`` pixels, within the bounds it may take.
+
+        The width is held as a share of the split view, capped at ``width``: a
+        wider window therefore keeps the dragged width (up to
+        ``OUTLINE_WIDTH_MAX``), while a narrower one scales the sidebar down with
+        it instead of squeezing the page out.
+        """
+        split_width = self.split.get_width()
+        if not split_width:
+            return
+        width = max(OUTLINE_WIDTH_MIN, min(OUTLINE_WIDTH_MAX, round(width)))
+        self.split.set_max_sidebar_width(width)
+        self.split.set_sidebar_width_fraction(min(1.0, width / split_width))
 
     # -- find in page ----------------------------------------------------
 

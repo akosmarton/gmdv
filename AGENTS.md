@@ -68,8 +68,10 @@ python3 gmdv.py [FILE.md]
   line, measured 99-111). A wider window does not stretch the text: the column stays 900px
   and centres (measured: window 1500 → left offset 300). While the outline sidebar is shown
   the 900px is only a maximum: the page takes the slot the sidebar leaves (measured, 960px
-  window with the sidebar inline: sidebar 240px = a quarter, page 720px,
-  `innerWidth == docScrollWidth == 720`, still no horizontal scrolling).
+  window with the sidebar inline at its default quarter: sidebar 240px, page 720px,
+  `innerWidth == docScrollWidth == 720`, still no horizontal scrolling). The sidebar's
+  width is draggable (see the outline divider bullet), so this is the default, not a fixed
+  number.
 - Do not express this in `ch`: `ch` is the width of `0` (10.09px at the 16px font) while
   prose averages ~8.08px per character, so `100ch` rendered 105-125 characters per line
   depending on window width. Measure, never guess: count characters per rendered line with
@@ -157,9 +159,11 @@ python3 gmdv.py [FILE.md]
   (reopening reselects and re-runs it), and `set_search_visible` is the single path
   for the toggle and Escape (`stop-search`).
 - The window is `GmdvWindow(Gtk.ApplicationWindow)`, whose child is an
-  `Adw.OverlaySplitView` (`self.split`): its sidebar is a
-  `Gtk.ScrolledWindow` around a `Gtk.ListBox` of rows built by `set_outline` from
-  `render`'s outline, its content is the old `self.find_bar` (revealer + web view).
+  `Adw.OverlaySplitView` (`self.split`): its sidebar is a horizontal `Gtk.Box`
+  of a `Gtk.ScrolledWindow` around a `Gtk.ListBox` of rows built by `set_outline`
+  from `render`'s outline, plus the 8px `self.outline_handle` grab strip and the
+  1px `Gtk.Separator` after it (the visible divider, see below); its content is
+  the old `self.find_bar` (revealer + web view).
   Every `load_html` site calls `set_outline` first — the page and the sidebar can
   never disagree — with `()` for the start page, error pages and a deleted file.
   Rows store their heading id on `row.anchor` and click-to-scroll is
@@ -178,6 +182,43 @@ python3 gmdv.py [FILE.md]
   `sidebar-hide-symbolic` is **not** in the installed icon theme (only
   `sidebar-show-symbolic` is), so the toggle keeps that one icon and the tooltip
   ("Outline (F9)" / "Hide outline (F9)") carries the state.
+- The sidebar width is dragged on `self.outline_handle`, a `Gtk.GestureDrag` on
+  the divider strip (cursor `col-resize`). The strip is 8px of **invisible** grab
+  area; the visible line is a `Gtk.Separator` placed *after* it, i.e. as the
+  sidebar slot's last pixel, so the divider is exactly the line where the page
+  starts. Do not put the separator inside the strip: a `GtkBox` lays a 1px
+  `Gtk.Separator` out against the strip's leading edge (alignment is not honoured
+  there), which leaves 8px of sidebar colour between the line and the page —
+  measured on the user's 1.4×-scaled screenshot as a divider ~11px wide (one
+  brighter line, then sidebar colour) — and reads as a thick divider. Verified
+  pixel by pixel here: sidebar colour up to `width-2`, one line pixel at
+  `width-1` (63,63,67 against a (46,46,50) sidebar and a (29,29,32) page), page
+  colour from `width` on. The handler reads the pointer from
+  `gesture.get_last_event().get_position()`, i.e. in **surface** coordinates:
+  `get_offset`/`get_point` report the pointer in the attached widget's space and
+  the handle travels with the edge it drags, so those offsets cancel out exactly
+  the movement being dragged (the sidebar would stall). `set_outline_width` then
+  sets `max-sidebar-width` to the dragged pixels and `sidebar-width-fraction` to
+  the share it had, clamped to `OUTLINE_WIDTH_MIN`..`OUTLINE_WIDTH_MAX` (180..640)
+  and to the split view's own width. Both properties exist since libadwaita 1.4,
+  the same release `Adw.OverlaySplitView` needs, so the floor does not move.
+  Measured: inline the width is `clamp(share × window, 180, dragged)`, so a wider
+  window keeps the dragged width (400 @960 → 400 @1200 → still 400 @1600) while a
+  narrower one scales it down (400/960 → 360 @800); collapsed, libadwaita sizes
+  the overlay as `clamp(window width, 180, dragged)` (a 500px window with a 540px
+  drag shows a full-window overlay, and dragging there sets the cap, e.g. 400).
+  The width lives only in the split view's properties, so it survives hiding,
+  navigation and monitor reloads; nothing is persisted across launches.
+  `Adw.OverlaySplitView` has no resize gesture of its own, and `Gtk.Paned` was
+  rejected because it would drop the overlay/collapse behaviour.
+- The sidebar must be **one** colour. Adwaita paints a `Gtk.ListBox` in the page's own
+  `view_bg_color`, so the list area came out darker than the 8px grab strip beside it
+  (transparent, so the pane's `sidebar_bg_color` shows through) — measured as a band
+  exactly the strip's width next to the divider. `self.outline_list` therefore carries
+  the stock **`.navigation-sidebar`** class, which repaints the list in
+  `sidebar_bg_color` — measured uniform (46,46,50) over the list area, the strip, and
+  the area below the rows of a short outline, against (29,29,32) for the page. The
+  `.sidebar` class is not that rule: it changes nothing here.
 - Installed desktop entry: `make install` rewrites the repo copy's bare
   `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
   GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
@@ -249,6 +290,28 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    `app.window.set_default_size(500, 800)` on a live instance → the next allocation
    sets `app.split.get_collapsed() is True` (`False` at the 960 default; measured
    on this host, where a mapped window does honour `set_default_size`).
+   Divider: the strip's geometry and hit area are checked directly —
+   `handle.compute_bounds(app.window)` (8px, left edge at `sidebar_width - 9`,
+   the line being the slot's last pixel) and
+   `app.window.pick(x, y, Gtk.PickFlags.DEFAULT)` reaching the handle — plus
+   `handle.get_cursor().get_name() == "col-resize"` and
+   `set_min/max_sidebar_width` being in place. Whether the divider *looks* right
+   is pixels: snapshot the window and read it back with
+   `GdkPixbuf.Pixbuf.new_from_file` (`get_pixels()` + `get_rowstride()`), then
+   assert the column run across the boundary is sidebar colour, **one** different
+   pixel at `width - 1`, page colour from `width` on — and that the sidebar is
+   that one colour across the list area, the grab strip and the area below the
+   rows of a short outline (see the `.navigation-sidebar` invariant; sampled at a
+   list row and well below the last row). `Gtk.WidgetPaintable` snapshots return a
+   `None` node on some frames, so retry the snapshot after a main-loop turn.
+   There is no input injection here, so a drag is driven with a stubbed gesture
+   (`get_last_event()` → an object whose `get_position()` returns a chosen point):
+   `app.on_outline_drag_begin(stub, 0, 0)` then
+   `app.on_outline_drag_update(stub, dx, 0)` with a moved point. Assert the
+   rendered width (`app.split.get_sidebar().get_width()`, 240 of 960 by default)
+   follows the pointer, that a ±10px wobble is absolute rather than cumulative,
+   that both bounds clamp, and that after a window resize the width sticks
+   (400 @960 → 400 @1200) while a narrower window scales it.
 
 ## Rules
 
