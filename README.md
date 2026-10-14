@@ -35,6 +35,8 @@ files open with it from the file manager. Remove with `make uninstall`
   `Ctrl+Left` / `Ctrl+Right` (also `Alt+b` / `Alt+f`).
 - Header-bar toggle between the normal reading column (a fixed 900px, centred)
   and full-window width.
+- In-page search: `Ctrl+F` or the header magnifier — case-insensitive, wraps
+  around, with a match counter.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`; each

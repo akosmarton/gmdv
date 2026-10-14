@@ -19,6 +19,11 @@ import markdown  # noqa: E402
 APP_ID = "io.github.akosmarton.gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
+# In-page find: case-insensitive, wraps around; the match count is capped
+# because WebKit reports UINT32_MAX when the cap is exceeded.
+FIND_OPTIONS = WebKit.FindOptions.CASE_INSENSITIVE | WebKit.FindOptions.WRAP_AROUND
+FIND_MAX_MATCHES = 1000
+
 # Default window size. The reading column is narrower than the window, so a
 # fresh window shows the text centred with equal side margins; PAGE_WIDTH keeps
 # that column fixed however the window is resized.
@@ -225,7 +230,16 @@ class GmdvApp(Adw.Application):
         self.width_button.connect("toggled", self.on_width_toggled)
         header.pack_end(self.width_button)
 
-        for name, handler in (("back", self.go_back), ("forward", self.go_forward)):
+        self.search_button = Gtk.ToggleButton(icon_name="system-search-symbolic")
+        self.search_button.set_tooltip_text("Find in page (Ctrl+F)")
+        self.search_button.connect("toggled", self.on_find_toggled)
+        header.pack_end(self.search_button)
+
+        for name, handler in (
+            ("back", self.go_back),
+            ("forward", self.go_forward),
+            ("find", self.toggle_find),
+        ):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", handler)
             self.add_action(action)
@@ -235,6 +249,7 @@ class GmdvApp(Adw.Application):
         self.set_accels_for_action(
             "app.forward", ["<Control>Right", "<Alt>Right", "<Alt>f"]
         )
+        self.set_accels_for_action("app.find", ["<Control>f"])
 
         self.title_label = Gtk.Label()
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -245,13 +260,65 @@ class GmdvApp(Adw.Application):
         settings.set_allow_file_access_from_file_urls(True)
         settings.set_allow_universal_access_from_file_urls(True)
         self.webview = WebKit.WebView(settings=settings)
-        self.window.set_child(self.webview)
+        # The box hands out only natural height otherwise, and a WebKit web view
+        # has none: without this the page is allocated zero height.
+        self.webview.set_vexpand(True)
+        self.webview.set_hexpand(True)
+
+        self.find_entry = Gtk.SearchEntry()
+        self.find_entry.set_placeholder_text("Find…")
+        self.find_entry.set_hexpand(True)
+
+        self.find_label = Gtk.Label()
+        self.find_label.set_css_classes(["dim-label"])
+        self.find_label.set_width_chars(12)
+        self.find_label.set_xalign(1.0)
+
+        self.find_prev_button = Gtk.Button(icon_name="go-up-symbolic")
+        self.find_prev_button.set_tooltip_text("Previous match")
+        self.find_next_button = Gtk.Button(icon_name="go-down-symbolic")
+        self.find_next_button.set_tooltip_text("Next match")
+
+        find_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        find_row.set_margin_top(6)
+        find_row.set_margin_bottom(6)
+        find_row.set_margin_start(6)
+        find_row.set_margin_end(6)
+        find_row.append(self.find_entry)
+        find_row.append(self.find_label)
+        find_row.append(self.find_prev_button)
+        find_row.append(self.find_next_button)
+
+        self.find_revealer = Gtk.Revealer()
+        self.find_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.find_revealer.set_transition_duration(200)
+        self.find_revealer.set_child(find_row)
+        self.find_revealer.set_reveal_child(False)
+
+        # A vertical box holding the find bar above the page: the bar sits
+        # directly under the header bar and pushes the page down while revealed.
+        self.find_bar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.find_bar.append(self.find_revealer)
+        self.find_bar.append(self.webview)
+        self.window.set_child(self.find_bar)
 
         drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
         drop.connect("drop", self.on_drop)
         self.window.add_controller(drop)
 
         self.webview.connect("decide-policy", self.on_decide_policy)
+        self.webview.connect("load-changed", self.on_load_changed)
+
+        self.find_controller = self.webview.get_find_controller()
+        self.find_controller.connect("counted-matches", self.on_counted_matches)
+        self.find_controller.connect("failed-to-find-text", self.on_search_failed)
+        self.find_entry.connect("search-changed", self.on_search_changed)
+        self.find_entry.connect("activate", self.on_search_next)
+        self.find_entry.connect("next-match", self.on_search_next)
+        self.find_entry.connect("previous-match", self.on_search_previous)
+        self.find_entry.connect("stop-search", self.on_search_stop)
+        self.find_prev_button.connect("clicked", self.on_search_previous)
+        self.find_next_button.connect("clicked", self.on_search_next)
 
         self.style_manager = Adw.StyleManager.get_default()
         self.style_manager.connect("notify::dark", self.on_dark_changed)
@@ -367,6 +434,97 @@ class GmdvApp(Adw.Application):
             f" if (page) page.classList.toggle('full', {full}); }})()"
         )
         self.webview.evaluate_javascript(script, -1, None, None, None, None)
+
+    # -- find in page ----------------------------------------------------
+
+    def toggle_find(self, *_args):
+        """Header magnifier and ``Ctrl+F`` share this entry point."""
+        self.search_button.set_active(not self.search_button.get_active())
+
+    def on_find_toggled(self, button):
+        self.set_search_visible(button.get_active())
+
+    def set_search_visible(self, visible):
+        """Slide the find bar in or out; Escape and the toggle share this path."""
+        self.find_revealer.set_reveal_child(visible)
+        if visible:
+            self.find_entry.grab_focus()
+            text = self.find_entry.get_text()
+            if text:
+                # Re-select the kept query so typing replaces it.
+                self.find_entry.select_region(0, len(text))
+                self.run_search(text)
+        else:
+            self.clear_find_highlight()
+            self.find_label.set_text("")
+            self.find_entry.remove_css_class("error")
+
+    def clear_find_highlight(self):
+        """Drop WebKit's find highlight and the selection it leaves behind.
+
+        ``search_finish()`` removes the yellow find highlight but keeps the
+        selection WebKit set for the current match, which still shows up as a
+        tinted range; clearing the selection ranges takes that away too.
+        """
+        self.find_controller.search_finish()
+        self.webview.evaluate_javascript(
+            "(() => { const s = window.getSelection(); if (s) s.removeAllRanges(); })()",
+            -1,
+            None,
+            None,
+            None,
+            None,
+        )
+
+    def run_search(self, text):
+        """(Re)run the find for ``text`` and refresh the match counter."""
+        self.find_controller.search(text, FIND_OPTIONS, 0)
+        self.find_controller.count_matches(text, FIND_OPTIONS, FIND_MAX_MATCHES)
+
+    def on_search_changed(self, entry):
+        text = entry.get_text()
+        if text:
+            self.run_search(text)
+        else:
+            self.clear_find_highlight()
+            self.find_label.set_text("")
+            entry.remove_css_class("error")
+
+    def on_search_next(self, *_args):
+        self.find_controller.search_next()
+
+    def on_search_previous(self, *_args):
+        self.find_controller.search_previous()
+
+    def on_search_stop(self, *_args):
+        self.search_button.set_active(False)
+
+    def on_counted_matches(self, _controller, n_matches):
+        if n_matches >= FIND_MAX_MATCHES:
+            # count_matches reports UINT32_MAX once the cap is exceeded.
+            self.find_label.set_text(f"{FIND_MAX_MATCHES}+ matches")
+        elif n_matches == 0:
+            self.find_label.set_text("no matches")
+        elif n_matches == 1:
+            self.find_label.set_text("1 match")
+        else:
+            self.find_label.set_text(f"{n_matches} matches")
+        if n_matches == 0:
+            self.find_entry.add_css_class("error")
+        else:
+            self.find_entry.remove_css_class("error")
+
+    def on_search_failed(self, _controller):
+        self.find_entry.add_css_class("error")
+
+    def on_load_changed(self, webview, event):
+        """A load clears WebKit's find state — re-run an open search."""
+        if (
+            event == WebKit.LoadEvent.FINISHED
+            and self.find_revealer.get_reveal_child()
+            and self.find_entry.get_text()
+        ):
+            self.run_search(self.find_entry.get_text())
 
     def refresh(self):
         palette = self.page_palette()

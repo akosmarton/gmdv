@@ -30,7 +30,10 @@ python3 gmdv.py [FILE.md]
   `on_open_clicked`/`on_open_finish`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
-  `on_width_toggled`/`apply_width`; file arguments via
+  `on_width_toggled`/`apply_width`; in-page find in
+  `toggle_find`/`set_search_visible`/`clear_find_highlight`/`run_search`/
+  `on_search_changed`/`on_counted_matches`/`on_search_failed`/`on_load_changed`;
+  file arguments via
   `Gio.ApplicationFlags.HANDLES_OPEN`/`NON_UNIQUE` in `__init__` and `do_open`; argv in
   `main`.
 
@@ -107,6 +110,31 @@ python3 gmdv.py [FILE.md]
   window exists) and `do_open` falls back to `initial_path` + `do_activate()` when no
   window is up yet; an in-process `open()` with a window already up loads the file and
   raises it.
+- In-page find (`Ctrl+F` / the header magnifier) is a `WebKit.FindController` driven
+  from a `Gtk.SearchEntry` inside a `Gtk.Revealer` stacked above the web view in
+  `self.find_bar`; the web view needs `set_vexpand(True)` there, since a box hands
+  out only natural height and a web view has none (without it the page gets 0px and
+  nothing is visible). Only `counted-matches` and `failed-to-find-text` exist on
+  this build — connecting `found`/`not-found` raises "unknown signal name", never
+  reference them. `count_matches` needs a real cap (`FIND_MAX_MATCHES`): `max=0`,
+  or a `max` below the real count, reports UINT32_MAX — hence a count
+  `>= FIND_MAX_MATCHES` renders as "1000+ matches"; counting does not cancel a
+  running `search`. Never call `search("")`: it emits `failed-to-find-text` and
+  drops the query, so empty input goes through `search_finish()`. Beyond the yellow
+  find highlight, WebKit also leaves its **selection** on the current match, which
+  still paints as a tinted range, so `search_finish()` alone does not clear what
+  the user sees: `clear_find_highlight()` also drops the selection ranges (measured:
+  after it, closing the bar renders the window pixel-identical to never having
+  searched). `search_finish()` likewise leaves `get_search_text()` populated —
+  never assert find state through that accessor; the found range *is* a DOM
+  selection, so `getSelection().getRangeAt(0).startOffset` is the exact probe for
+  the current match, and `find_entry.has_focus()` is always False because a
+  `Gtk.Entry`'s focus leaf is its internal `GtkText` (walk `window.get_focus()`
+  instead). `load_html` clears WebKit's find state, so `on_load_changed` re-runs an
+  open search on `LoadEvent.FINISHED` — the counter then follows monitor reloads,
+  link navigation and back/forward. The entry keeps its query across closing
+  (reopening reselects and re-runs it), and `set_search_visible` is the single path
+  for the toggle and Escape (`stop-search`).
 - Installed desktop entry: `make install` rewrites the repo copy's bare
   `Exec=gmdv %f` to the absolute `$(DESTBIN)/gmdv %f`. GIO does not load — and so
   GNOME Shell's app grid does not list, and cannot launch — a desktop entry whose
@@ -149,6 +177,20 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    `is_active()`, while the first keeps showing A; `busctl --user list | grep gmdv`
    reports no bus name. Verify the launched window is active by pointing a throwaway
    desktop file's `Exec` at a probe script that logs `window.is_active()`.
+9. In-page find: `GmdvApp(path)`, `activate()`, then `activate_action("find", None)`
+   shows the bar (`app.find_revealer.get_reveal_child()` — do not probe focus with
+   `find_entry.has_focus()`, see the invariants) and `app.find_entry.set_text("lorem")`
+   drives the assertions — `app.find_label.get_text()`
+   ("3 matches" / "1 match" / "no matches" / "1000+ matches") and the entry's
+   `error` CSS class. Which match is current, and whether Enter/`next-match`/
+   `previous-match`/the bar buttons move and wrap it, is read from the DOM:
+   `document.getSelection().getRangeAt(0).startOffset`. Reopen and monitor-reload
+   behaviour is asserted the same way after rewriting the file. Highlight presence is
+   pixels only (WebKit paints the current match yellow): snapshot the page and count
+   `r>180, g>180, b<140` pixels — nonzero for a hit, 0 after clearing the query or
+   closing the bar. `GObject.signal_lookup` and `GObject.signal_list_names` return
+   nothing useful on this host, so a signal's existence is proven by connecting to it
+   at runtime, not by introspection.
 
 ## Rules
 
