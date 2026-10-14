@@ -134,6 +134,8 @@ class GmdvApp(Adw.Application):
         self.initial_path = initial_path
         self.path = None
         self.monitor = None
+        self.history = []
+        self.history_index = -1
 
     def do_activate(self):
         self.window = Gtk.ApplicationWindow(application=self)
@@ -142,10 +144,32 @@ class GmdvApp(Adw.Application):
         header = Gtk.HeaderBar()
         self.window.set_titlebar(header)
 
+        self.back_button = Gtk.Button(icon_name="go-previous-symbolic")
+        self.back_button.set_tooltip_text("Go back")
+        self.back_button.connect("clicked", self.go_back)
+        header.pack_start(self.back_button)
+
+        self.forward_button = Gtk.Button(icon_name="go-next-symbolic")
+        self.forward_button.set_tooltip_text("Go forward")
+        self.forward_button.connect("clicked", self.go_forward)
+        header.pack_start(self.forward_button)
+        self.update_nav_buttons()
+
         open_button = Gtk.Button(icon_name="document-open-symbolic")
         open_button.set_tooltip_text("Open a markdown file")
         open_button.connect("clicked", self.on_open_clicked)
         header.pack_start(open_button)
+
+        for name, handler in (("back", self.go_back), ("forward", self.go_forward)):
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", handler)
+            self.add_action(action)
+        self.set_accels_for_action(
+            "app.back", ["<Control>Left", "<Alt>Left", "<Alt>b"]
+        )
+        self.set_accels_for_action(
+            "app.forward", ["<Control>Right", "<Alt>Right", "<Alt>f"]
+        )
 
         self.title_label = Gtk.Label()
         self.title_label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -195,14 +219,35 @@ class GmdvApp(Adw.Application):
         rgba.parse(PALETTE[self.is_dark()]["bg"])
         self.webview.set_background_color(rgba)
 
-    def load_file(self, path):
+    def load_file(self, path, push=True):
+        """Show ``path``, optionally recording it as a new history entry."""
+        path = os.path.abspath(path)
+        if push and path != self.path:
+            del self.history[self.history_index + 1:]
+            self.history.append(path)
+            self.history_index = len(self.history) - 1
         self.path = path
         self.title_label.set_text(os.path.basename(path))
         if self.monitor:
             self.monitor.cancel()
         self.monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.NONE)
         self.monitor.connect("changed", self.on_file_changed)
+        self.update_nav_buttons()
         self.refresh()
+
+    def go_back(self, *_args):
+        if self.history_index > 0:
+            self.history_index -= 1
+            self.load_file(self.history[self.history_index], push=False)
+
+    def go_forward(self, *_args):
+        if self.history_index + 1 < len(self.history):
+            self.history_index += 1
+            self.load_file(self.history[self.history_index], push=False)
+
+    def update_nav_buttons(self):
+        self.back_button.set_sensitive(self.history_index > 0)
+        self.forward_button.set_sensitive(self.history_index + 1 < len(self.history))
 
     def refresh(self):
         try:

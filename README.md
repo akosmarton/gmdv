@@ -13,6 +13,8 @@ python3 gmdv.py [FILE.md]
 - Rendered markdown view (headings, tables, fenced code blocks, blockquotes).
 - Open a file via the header-bar button, drag-and-drop onto the window, or the CLI argument.
 - Clicking a link to a local file renders that file in place (title bar and auto-reload follow it).
+- Back/forward navigation across visited files, with header-bar buttons and
+  `Ctrl+Left` / `Ctrl+Right` (also `Alt+b` / `Alt+f`).
 - Auto-reloads when the opened file changes on disk.
 - Follows the system dark/light color scheme.
 

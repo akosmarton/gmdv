@@ -24,7 +24,8 @@ python3 gmdv.py [FILE.md]
 - `GmdvApp(Adw.Application)`: window assembly in `do_activate`; render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
   `on_dark_changed`/`set_bg`; file dialog in `on_open_clicked`/`on_open_finish`;
-  drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; argv in `main`.
+  drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
+  `go_back`/`go_forward`/`update_nav_buttons`; argv in `main`.
 
 ## Invariants and gotchas
 
@@ -37,6 +38,13 @@ python3 gmdv.py [FILE.md]
   navigations, call `decision.ignore()` and `load_file(path)` — without this, a link to
   another markdown file is displayed as raw text and the title/monitor stay stale.
   Intercepting every `file://` navigation also breaks `load_html` itself.
+- Back/forward uses the app's own stack (`self.history` + `self.history_index`), **never**
+  the WebView's history: every `load_html` adds a WebKit history entry, so WebKit's list
+  would desync from the title bar and the file monitor. `load_file(path, push=True)`
+  records an entry (dropping any forward entries), history moves load with `push=False`.
+  Only push when the path actually changes, so re-clicking the same link does not grow the
+  stack. `update_nav_buttons` derives both buttons' sensitivity from the index, and the
+  actions `app.back`/`app.forward` carry the accelerators.
 - One `Gio.FileMonitor` per loaded file (cancel the previous one in `load_file`). Monitor
   events re-render directly, with no debounce; transient double renders on atomic saves
   are accepted. Deleted files render an error page.
@@ -60,9 +68,17 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    `webview.evaluate_javascript(script, -1, None, None, None, cb)` and parse
    `evaluate_javascript_finish(...).to_string()` to assert rendered DOM, theme colors,
    monitor reload, deletion handling and link clicks.
-3. Visual proof: `webview.get_snapshot(WebKit.SnapshotRegion.FULL_DOCUMENT,
+3. Visual proof of the page: `webview.get_snapshot(WebKit.SnapshotRegion.FULL_DOCUMENT,
    WebKit.SnapshotOptions.NONE, None, cb)` then save the texture as PNG and look at it.
-4. Window smoke: `timeout 8 python3 gmdv.py /tmp/demo.md; echo $?` → expect `124`
+4. Visual proof of the whole window (header bar included, no X tooling needed):
+   `Gtk.WidgetPaintable.new(window)` → `Gtk.Snapshot` → `Gsk.CairoRenderer.new().render_texture`
+   → `texture.save_to_png`. ImageMagick's `import` fails on this host ("missing an image
+   filename"), so do not rely on it.
+5. UI state that is not pixel-visible (e.g. button sensitivity, accelerators) is asserted
+   directly: `button.get_sensitive()`, `app.get_accels_for_action("app.back")`, and
+   `app.activate_action("back", None)`; there is no key-injection tool (xdotool etc.) here,
+   so accelerators themselves are verified as registrations, not as delivered keypresses.
+6. Window smoke: `timeout 8 python3 gmdv.py /tmp/demo.md; echo $?` → expect `124`
    (window stayed up) with empty stderr.
 
 ## Rules
