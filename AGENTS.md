@@ -45,6 +45,18 @@ python3 gmdv.py [FILE.md]
   Only push when the path actually changes, so re-clicking the same link does not grow the
   stack. `update_nav_buttons` derives both buttons' sensitivity from the index, and the
   actions `app.back`/`app.forward` carry the accelerators.
+- The page column is sized to the default window: `WINDOW_WIDTH` (900) feeds both
+  `set_default_size` and the `.page` rule (`box-sizing:border-box; max-width:{WINDOW_WIDTH}px`),
+  so a fresh window is filled exactly — page 900px, left offset 0, no side margins, no
+  horizontal scrolling (measured `docScrollWidth == innerWidth == 900`). `border-box` keeps
+  the 24px padding inside those 900px, leaving an 852px text column (~107 characters per
+  line, measured 99-111). A wider window does not stretch the text: the column stays 900px
+  and centres.
+- Do not express this in `ch`: `ch` is the width of `0` (10.09px at the 16px font) while
+  prose averages ~8.08px per character, so `100ch` rendered 105-125 characters per line
+  depending on window width. Measure, never guess: count characters per rendered line with
+  the Range API, grouping characters by line top. Re-measure this way after changing the
+  font stack, font size, padding or window size.
 - One `Gio.FileMonitor` per loaded file (cancel the previous one in `load_file`). Monitor
   events re-render directly, with no debounce; transient double renders on atomic saves
   are accepted. Deleted files render an error page.
@@ -61,7 +73,8 @@ python3 gmdv.py [FILE.md]
 There is no test suite; verify with throwaway scripts and delete them afterwards.
 
 1. Headless pure layer: `import gmdv` and assert on `render_markdown`, `build_page`
-   (palette colors, `max-width:48rem`), `error_page` (escaping of `<script>`), `read_source`
+   (palette colors, `box-sizing:border-box` + `max-width:900px`), `error_page`
+   (escaping of `<script>`), `read_source`
    (invalid UTF-8 replaced, no exception).
 2. Runtime DOM probe (needs a display): build the app (`GmdvApp(path)`,
    `register(None)`, `activate()`), wait for the load, then

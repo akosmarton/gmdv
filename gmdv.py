@@ -18,6 +18,11 @@ import markdown  # noqa: E402
 APP_ID = "io.github.gmdv.Gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
+# Default window size; the page column is sized to match it exactly so the text
+# column fits a freshly opened window without margins or horizontal scrolling.
+WINDOW_WIDTH = 900
+WINDOW_HEIGHT = 650
+
 PALETTE = {
     False: {
         "bg": "#ffffff",
@@ -65,7 +70,8 @@ body {{
   font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
 }}
 .page {{
-  max-width:48rem;
+  box-sizing:border-box;
+  max-width:{WINDOW_WIDTH}px;
   margin:0 auto;
   padding:24px;
 }}
@@ -139,7 +145,7 @@ class GmdvApp(Adw.Application):
 
     def do_activate(self):
         self.window = Gtk.ApplicationWindow(application=self)
-        self.window.set_default_size(900, 650)
+        self.window.set_default_size(WINDOW_WIDTH, WINDOW_HEIGHT)
 
         header = Gtk.HeaderBar()
         self.window.set_titlebar(header)
