@@ -19,7 +19,121 @@ import markdown  # noqa: E402
 APP_ID = "io.github.akosmarton.gmdv"
 EXTENSIONS = ["tables", "fenced_code", "sane_lists"]
 
-# In-page find: case-insensitive, wraps around; the match count is capped
+# Dependency contract. gi.require_version above pins the API *generation* of the
+# GUI stack (Gtk 4.0, Adw 1, WebKitGTK 6.0) — the most a distribution package
+# can be pinned to, since PyGObject ships as a source tarball on PyPI and has no
+# wheels. The releases inside that generation are checked at startup instead:
+# a library below them lacks the API gmdv calls, which is a crash rather than a
+# degraded view. python-markdown is a plain pip dependency and is pinned
+# exactly, in requirements.txt (VERIFIED_MARKDOWN mirrors that pin); the floor
+# exists because the page layout is built against the 3.x output and 2.x is
+# unmaintained and renders differently.
+#
+#   GTK        4.10 — Gtk.FileDialog, the file chooser (unannotated Adw methods
+#                     and the other Gtk calls date from 4.0)
+#   libadwaita 1.0  — Adw.Application and Adw.StyleManager
+#   WebKitGTK  2.40 — the first stable release of the WebKit 6.0 API itself
+MIN_MARKDOWN = (3, 0)
+MIN_GTK = (4, 10)
+MIN_ADW = (1, 0)
+MIN_WEBKIT = (2, 40)
+VERIFIED_MARKDOWN = "3.10.3"
+
+
+def dotted(version):
+    """Render a parsed version tuple the way it is written in package names."""
+    return ".".join(str(number) for number in version)
+
+
+def version_tuple(text):
+    """Parse a dotted release string into a comparable tuple, () if unparseable."""
+    parts = []
+    for part in str(text).split("."):
+        digits = ""
+        for char in part:
+            if not char.isdigit():
+                break
+            digits += char
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def meets(version, minimum):
+    """Whether a parsed version reaches a minimum, shorter ones padded with 0.
+
+    An empty tuple means the version is missing or unparseable: unknown, never
+    a failure.
+    """
+    if not version:
+        return True
+    return version + (0,) * len(minimum) >= minimum
+
+
+def gui_stack():
+    """Name, loaded release, floor and justifying API of each GUI library."""
+    return (
+        (
+            "GTK",
+            (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()),
+            MIN_GTK,
+            "Gtk.FileDialog",
+        ),
+        (
+            "libadwaita",
+            (Adw.MAJOR_VERSION, Adw.MINOR_VERSION, Adw.MICRO_VERSION),
+            MIN_ADW,
+            "Adw.Application",
+        ),
+        (
+            "WebKitGTK",
+            (WebKit.get_major_version(), WebKit.get_minor_version(), WebKit.get_micro_version()),
+            MIN_WEBKIT,
+            "the WebKit 6.0 API",
+        ),
+    )
+
+
+def loaded_report():
+    """One line naming every loaded dependency, for a bug report."""
+    libraries = [f"python {sys.version.split()[0]}", f"PyGObject {gi.__version__}"]
+    libraries += [f"{name} {dotted(version)}" for name, version, _, _ in gui_stack()]
+    libraries.append(f"python-markdown {getattr(markdown, '__version__', 'unknown')}")
+    return ", ".join(libraries)
+
+
+def dependency_error():
+    """A printable report of unmet dependency floors, or None when all is well.
+
+    PyGObject and the interpreter are reported but not floored: nothing gmdv
+    calls is gated on their release, only on the typelib releases above.
+    """
+    problems = []
+    markdown_release = getattr(markdown, "__version__", "")
+    if not meets(version_tuple(markdown_release), MIN_MARKDOWN):
+        problems.append(
+            f"python-markdown {markdown_release} is older than {dotted(MIN_MARKDOWN)} "
+            f"(verified with {VERIFIED_MARKDOWN}, see requirements.txt); upgrade it "
+            f"with: pip install --upgrade 'Markdown>={dotted(MIN_MARKDOWN)}'"
+        )
+    for name, version, floor, needed_by in gui_stack():
+        if not meets(version, floor):
+            problems.append(
+                f"{name} {dotted(version)} is older than {dotted(floor)}, "
+                f"which {needed_by} needs"
+            )
+    if not problems:
+        return None
+    lines = "".join(f"      {problem}\n" for problem in problems)
+    return (
+        "gmdv: dependency versions below the floor:\n"
+        f"{lines}"
+        f"      loaded: {loaded_report()}"
+    )
+
+
+# In-page find: case-insensitive, wraps around, the match count is capped
 # because WebKit reports UINT32_MAX when the cap is exceeded.
 FIND_OPTIONS = WebKit.FindOptions.CASE_INSENSITIVE | WebKit.FindOptions.WRAP_AROUND
 FIND_MAX_MATCHES = 1000
@@ -639,6 +753,10 @@ class GmdvApp(Adw.Application):
 
 
 def main():
+    problem = dependency_error()
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
     path = sys.argv[1] if len(sys.argv) > 1 else None
     return GmdvApp(path).run(sys.argv)
 

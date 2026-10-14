@@ -1,0 +1,13 @@
+# gmdv's only pip-installable runtime dependency: the markdown renderer. It is
+# pinned to the release the page layout is verified against, and gmdv refuses to
+# start on anything older than 3.0 (dependency_error() in gmdv.py).
+#
+# The GUI stack is deliberately absent: PyGObject is published on PyPI as a
+# source tarball only, so installing it here would need the GTK, libadwaita and
+# WebKitGTK development headers plus a compiler. Those libraries come from the
+# distribution as packages instead; see the Requirements section of README.md
+# for the versions gmdv is verified against.
+#
+# Markdown 3.10.3 itself needs Python 3.10 or newer; on an older Python install
+# the distribution package is the way to go, as long as it is a 3.x release.
+Markdown==3.10.3

@@ -44,10 +44,22 @@ files open with it from the file manager. Remove with `make uninstall`
 
 ## Requirements
 
-- GTK 4 with PyGObject (`python3-gobject`)
-- libadwaita (`Adw` 1)
-- WebKitGTK 6.0 (`WebKit` 6.0) bindings
-- `python-markdown` (`pip install markdown`)
+| Component | Minimum gmdv needs | Verified against | Install |
+| --- | --- | --- | --- |
+| GTK 4 | 4.10 (`Gtk.FileDialog`) | 4.22.5 | `gtk4` |
+| PyGObject | any release that loads the typelibs | 3.56.3 | `python3-gobject` |
+| libadwaita (`Adw` 1) | 1.0 | 1.9.4 | `libadwaita` |
+| WebKitGTK (`WebKit` 6.0) | 2.40, the first release of the 6.0 API | 2.54.1 | `webkitgtk6.0` |
+| python-markdown | 3.0 | 3.10.3 | `python3-markdown`, or `pip install -r requirements.txt` |
+
+gmdv pins the API generation of the GUI stack at import time
+(`gi.require_version`: Gtk 4.0, Adw 1, WebKit 6.0) — more is not possible for a
+distribution package, since PyGObject is published on PyPI as a source tarball
+only. The releases inside that generation are checked at startup instead: gmdv
+exits with a report when GTK, libadwaita, WebKitGTK or python-markdown is older
+than the minimum above, and prints every loaded version, rather than crashing on
+a missing API or rendering with an untested markdown release. The markdown
+renderer is additionally pinned in `requirements.txt` to the version above.
 
 ## License
 

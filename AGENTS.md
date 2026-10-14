@@ -21,8 +21,9 @@ python3 gmdv.py [FILE.md]
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
   `read_source`, `render_markdown`, `build_page`/`error_page` (both take a palette
-  dict), `PALETTE` (a static fallback palette), `START_PAGE`, and the width
-  constants `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
+  dict), `PALETTE` (a static fallback palette), `START_PAGE`, the dependency
+  helpers `dotted`/`version_tuple`/`meets`/`gui_stack`/`loaded_report`/
+  `dependency_error`, and the width constants `WINDOW_WIDTH`/`WINDOW_HEIGHT`/`PAGE_WIDTH`.
 - `GmdvApp(Adw.Application)`: window assembly in `do_activate` (idempotent — presents
   the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
@@ -98,6 +99,17 @@ python3 gmdv.py [FILE.md]
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
 - UI strings are English. No syntax highlighting and no `nl2br`; extensions are exactly
   `tables`, `fenced_code`, `sane_lists`.
+- Dependency versions: `gi.require_version` pins the API generation of the GUI stack
+  (Gtk 4.0, Adw 1, WebKit 6.0), which is all a distribution package can be pinned to —
+  PyGObject has no PyPI wheels. The releases inside that generation are enforced in
+  `main()` by `dependency_error()`: `MIN_GTK` (4.10, `Gtk.FileDialog`), `MIN_ADW`
+  (1.0), `MIN_WEBKIT` (2.40, the 6.0 API) and `MIN_MARKDOWN` (3.0). It exits 1 with one
+  line per offending library and a `loaded_report()` line naming every loaded version;
+  a missing or unparseable version is unknown, never a failure. Only python-markdown is
+  a pip dependency, so only it is pinned exactly (`requirements.txt`,
+  `VERIFIED_MARKDOWN`); PyGObject and the interpreter are reported but not floored,
+  nothing gmdv calls being gated on their release. Lower a floor only against the API
+  actually used, and keep README's table in step.
 - Instances are per launch (`NON_UNIQUE`): the app owns no bus name and never forwards,
   so opening a file from outside (file manager, `xdg-open`) starts a **fresh, focused
   window** instead of swapping the document inside a background instance (measured:
