@@ -235,6 +235,12 @@ def render(text):
     Outline entries carry the ids the ``toc`` extension gave the rendered
     headings; they come from the rendered result, not from re-parsing the
     source, so setext headings are outlined and fenced code blocks are not.
+
+    The names come out HTML-escaped (``&amp;``, ``&lt;``) because they are taken
+    from the rendered heading, so they are unescaped here: the sidebar shows them
+    in a plain ``Gtk.Label``, which would print the entities literally. Inline
+    markup and raw HTML drop out of the names along the way (``**bold**`` and
+    ``<span>x</span>`` leave just their text).
     """
     converter = markdown.Markdown(extensions=EXTENSIONS)
     body = converter.convert(text)
@@ -242,7 +248,9 @@ def render(text):
 
     def walk(tokens):
         for token in tokens:
-            entries.append((token["level"], token["name"], token["id"]))
+            entries.append(
+                (token["level"], html.unescape(token["name"]), token["id"])
+            )
             walk(token["children"])
 
     walk(converter.toc_tokens)

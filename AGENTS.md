@@ -21,7 +21,8 @@ python3 gmdv.py [FILE.md]
 
 - Pure layer, module level, no GUI imports used — keep it headless-testable:
   `read_source`, `render` (returns `(body_html, outline)`, the outline being the
-  `(level, name, id)` tuples the sidebar is built from), `build_page`/`error_page` (both take a palette
+  `(level, name, id)` tuples the sidebar is built from, with the names unescaped
+  to plain text), `build_page`/`error_page` (both take a palette
   dict), `PALETTE` (a static fallback palette), `START_PAGE`, the dependency
   helpers `dotted`/`version_tuple`/`meets`/`gui_stack`/`loaded_report`/
   `dependency_error`, and the width constants
@@ -168,7 +169,14 @@ python3 gmdv.py [FILE.md]
   never disagree — with `()` for the start page, error pages and a deleted file.
   Rows store their heading id on `row.anchor` and click-to-scroll is
   `getElementById(anchor).scrollIntoView({behavior:'smooth'})` in the live
-  document, so no re-render (and no scroll reset) is involved. Collapse: below
+  document, so no re-render (and no scroll reset) is involved. The row text is a
+  plain `Gtk.Label`, so `render` hands back **unescaped** names: the `toc`
+  extension keeps the heading's HTML entities (`## Feeder & Nozzle` →
+  `'Feeder &amp; Nozzle'`, `## 1 &lt; 2` → `'1 &lt; 2'`), which the label would
+  otherwise print literally (the page is fine because the browser unescapes them).
+  Inline markup and raw HTML drop out of the names on the way, so a heading written
+  as raw `<Common Data>` (not entity-escaped) reads `3. button` in the outline
+  while the page shows the tag as text. Collapse: below
   `OUTLINE_COLLAPSE_WIDTH` (600) the sidebar overlays the content, at or above it
   sits beside it. `Adw.Breakpoint` was the obvious driver but needs an `Adw.Bin`
   window, and `Adw.OverlaySplitView` is final (not subclassable), while GTK 4 has
@@ -244,7 +252,9 @@ python3 gmdv.py [FILE.md]
 There is no test suite; verify with throwaway scripts and delete them afterwards.
 
 1. Headless pure layer: `import gmdv` and assert on `render` (the outline of
-   setext/duplicate headings and that fenced code contributes none), `build_page`
+   setext/duplicate headings, that fenced code contributes none, and that
+   entity-escaped headings come back as plain text: `## 1 &lt; 2 &amp; 3` →
+   `'1 < 2 & 3'`), `build_page`
    (palette colors, `box-sizing:border-box` + `max-width:900px`), `error_page`
    (escaping of `<script>`), `read_source`
    (invalid UTF-8 replaced, no exception).
@@ -317,7 +327,10 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    viewport, via `evaluate_javascript` + `evaluate_javascript_finish(...).to_string()`
    after ~700ms for the smooth scroll). A file with no headings (or the start page)
    leaves 0 rows and shows `app.outline_empty`; a monitor reload or link navigation
-   replaces the rows with the new document's. Collapse:
+   replaces the rows with the new document's. Rows and page agree for
+   entity-escaped headings too: the label texts (`row.get_child().get_text()`) must
+   equal the DOM's `textContent` for the matching `h1`-`h6` (see the unescaped-name
+   invariant). Collapse:
    `app.window.set_default_size(500, 800)` on a live instance → the next allocation
    sets `app.split.get_collapsed() is True` (`False` at the 960 default; measured
    on this host, where a mapped window does honour `set_default_size`).
