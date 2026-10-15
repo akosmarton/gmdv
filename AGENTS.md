@@ -31,7 +31,8 @@ python3 gmdv.py [FILE.md]
   the existing window if one is up); render pipeline in
   `load_file`/`refresh`; file watching in `load_file`/`on_file_changed`; theme in
   `page_palette`/`on_dark_changed`/`apply_theme`/`set_bg`; file dialog in
-  `on_open_clicked`/`on_open_finish`;
+  `on_open_clicked`/`on_open_finish`; printing in
+  `on_print`/`on_print_failed`;
   drag-and-drop in `on_drop`; link navigation in `on_decide_policy`; back/forward in
   `go_back`/`go_forward`/`update_nav_buttons`; width mode in
   `on_width_toggled`/`apply_width`; outline sidebar in
@@ -103,6 +104,26 @@ python3 gmdv.py [FILE.md]
   notified — so `on_dark_changed` defers the re-render by one main-loop turn
   (`GLib.idle_add(self.apply_theme)`). Re-rendering inline leaves the page one
   scheme change behind.
+- Printing (`Ctrl+P`, `app.print`, the header printer button — one path,
+  `on_print`) is `WebKit.PrintOperation.new(self.webview).run_dialog(self.window)`:
+  WebKit's modal print dialog blocks until answered and prints whatever the view
+  shows — document, start page or error page — so the button carries no
+  sensitivity management. The printout is always in paper colors: `build_page`
+  carries an `@media print` block (white background, near-black text) overriding
+  the window scheme, WebKitGTK honoring print media and painting page
+  backgrounds (measured on 2.54.1: a screen-red body with an `@media print`
+  green background printed green, the paper margins outside the body stay
+  unpainted; without the block a dark window printed a 79%-dark page). A print
+  failure is the `failed` signal, reported on stderr like `dependency_error`.
+  Print-to-file makes WebKit register the output in GTK's recent files, keyed by
+  the application name, so `main()` calls `GLib.set_application_name("gmdv")`:
+  GLib otherwise falls back to the program name and the entry reads `gmdv.py`
+  (measured in `~/.local/share/recently-used.xbel` —
+  `<bookmark:application name="gmdv" …>` with the call, the program name
+  without it). The "no name of the application that is registering it was
+  defined" warning needs a process that never calls `g_application_run` (a
+  register/activate probe driving a bare main loop), so it never reaches a real
+  launch.
 - WebKit 6.0 snapshots resolve to a `Gdk.Texture` (`texture.save_to_png(path)`), not a
   cairo surface.
 - `read_source` decodes with `errors="replace"`: bad bytes must never raise.
@@ -230,7 +251,7 @@ python3 gmdv.py [FILE.md]
 - Every header and find-bar button has an accelerator, and every one of them goes
   through the app action of the same feature: `app.back`/`app.forward` (arrows and
   `Alt+b`/`Alt+f`), `app.find` (`Ctrl+F`), `app.outline` (`F9`), `app.open`
-  (`Ctrl+O`), `app.width` (`Ctrl+0`), `app.next-match` (`Ctrl+G`),
+  (`Ctrl+O`), `app.print` (`Ctrl+P`), `app.width` (`Ctrl+0`), `app.next-match` (`Ctrl+G`),
   `app.previous-match` (`Ctrl+Shift+G`) and `app.close` (`Ctrl+W`, closing the one
   window this launch owns). The buttons themselves stay wired to signals (or to
   the toggle path, e.g. `toggle_width` flipping `width_button`) rather than to
@@ -319,7 +340,7 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    at runtime, not by introspection.
 10. Outline sidebar: `GmdvApp(path)`, `activate()`, then `activate_action("outline", None)`
    shows the sidebar (`app.split.get_show_sidebar()`, default `False`) and
-   `app.get_accels_for_action("app.outline") == ("F9",)`; rows are asserted by walking
+   `app.get_accels_for_action("app.outline") == ["F9"]`; rows are asserted by walking
    `app.outline_list`'s children (count, label text, `row.anchor`, and the label's
    `margin_start` growing with the heading level). Clicking is
    `app.outline_list.emit("row-activated", row)` and the scroll is proven from the DOM
@@ -356,6 +377,19 @@ There is no test suite; verify with throwaway scripts and delete them afterwards
    follows the pointer, that a ±10px wobble is absolute rather than cumulative,
    that both bounds clamp, and that after a window resize the width sticks
    (400 @960 → 400 @1200) while a narrower window scales it.
+11. Print: accelerators and tooltips as usual (`app.print` → `["<Control>p"]`,
+   printer button tooltip "Print (Ctrl+P)"); both entry points are proven with a
+   class-level `on_print` recorder patched before `activate()` (the `app.open`
+   pattern). The real print is driven without a printer: replace
+   `gmdv.WebKit.PrintOperation` with a wrapper whose `new` presets
+   `Gtk.PrintSettings` (printer "Print to File", format "pdf",
+   `Gtk.PRINT_SETTINGS_OUTPUT_URI` a /tmp path), activate `app.print`, and from
+   a timeout respond `Gtk.ResponseType.OK` to the `PrintUnixDialog` toplevel
+   (`Gtk.Dialog.response` is deprecated but functional). Assert the PDF magic,
+   `pdfinfo` page count, `pdftotext` content, and — after
+   `Adw.ColorScheme.FORCE_DARK` — that the printed page is paper: rendered with
+   `pdftoppm`, dark pixels are a small fraction (a dark-scheme print without the
+   `@media print` block measured 0.79), proving the block wins over the scheme.
 
 ## Rules
 

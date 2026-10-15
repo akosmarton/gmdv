@@ -320,6 +320,14 @@ hr {{
   border: 0;
   border-top: 1px solid {palette["border"]};
 }}
+/* Paper colors, whatever scheme the window is in. */
+@media print {{
+  body {{ background:#ffffff; color:#1b1b1f; }}
+  pre, code {{ background:#f6f8fa; }}
+  h1, h2, td, th, hr {{ border-color:#d0d0d5; }}
+  blockquote {{ border-left-color:#8b8b90; color:#57575e; }}
+  a {{ color:#0461be; }}
+}}
 """
     return (
         "<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -406,6 +414,11 @@ class GmdvApp(Adw.Application):
         open_button.connect("clicked", self.on_open_clicked)
         header.pack_start(open_button)
 
+        print_button = Gtk.Button(icon_name="printer-symbolic")
+        print_button.set_tooltip_text("Print (Ctrl+P)")
+        print_button.connect("clicked", self.on_print)
+        header.pack_start(print_button)
+
         self.width_button = Gtk.ToggleButton(icon_name="zoom-original-symbolic")
         self.width_button.set_tooltip_text("Normal width (Ctrl+0, click for full width)")
         self.width_button.set_active(self.full_width)
@@ -429,6 +442,7 @@ class GmdvApp(Adw.Application):
             ("find", self.toggle_find),
             ("outline", self.toggle_outline),
             ("open", self.on_open_clicked),
+            ("print", self.on_print),
             ("width", self.toggle_width),
             ("next-match", self.on_search_next),
             ("previous-match", self.on_search_previous),
@@ -446,6 +460,7 @@ class GmdvApp(Adw.Application):
         self.set_accels_for_action("app.find", ["<Control>f"])
         self.set_accels_for_action("app.outline", ["F9"])
         self.set_accels_for_action("app.open", ["<Control>o"])
+        self.set_accels_for_action("app.print", ["<Control>p"])
         self.set_accels_for_action("app.width", ["<Control>0"])
         self.set_accels_for_action("app.next-match", ["<Control>g"])
         self.set_accels_for_action("app.previous-match", ["<Control><Shift>g"])
@@ -979,8 +994,18 @@ class GmdvApp(Adw.Application):
         if path:
             self.load_file(path)
 
+    def on_print(self, *_args):
+        """Print the displayed page; the header button and Ctrl+P share this path."""
+        print_operation = WebKit.PrintOperation.new(self.webview)
+        print_operation.connect("failed", self.on_print_failed)
+        print_operation.run_dialog(self.window)
+
+    def on_print_failed(self, _operation, error):
+        print(f"gmdv: printing failed: {error.message}", file=sys.stderr)
+
 
 def main():
+    GLib.set_application_name("gmdv")
     problem = dependency_error()
     if problem:
         print(problem, file=sys.stderr)

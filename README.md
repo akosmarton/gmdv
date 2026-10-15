@@ -42,6 +42,8 @@ files open with it from the file manager. Remove with `make uninstall`
 - Outline sidebar: the header toggle or `F9` lists the document's headings;
   click one to scroll to it, and drag the divider to widen or narrow the
   sidebar.
+- Print the page with `Ctrl+P` or the header-bar printer button; the printout
+  uses paper colors (black on white) whatever the window's light/dark scheme.
 - Auto-reloads when the opened file changes on disk.
 - Uses the system GTK/Adwaita theme colors, following the light/dark scheme.
 - Registered as the default handler for markdown files after `make install`; each
